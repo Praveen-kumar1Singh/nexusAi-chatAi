@@ -156,7 +156,7 @@ def stream_chat(
 
             last_exc = None
             rot_keys = llm.rotating_keys()
-            attempts_per_model = max(len(rot_keys), 2)
+            attempts_per_model = max(len(rot_keys) * 2, 4)
 
             for try_model in models_to_try:
                 model_unavailable = False
@@ -173,7 +173,10 @@ def stream_chat(
                         )
                         break
                     except Exception as exc:
+                        last_exc = exc
                         exc_str = str(exc).lower()
+                        print(f"[agent] Error trying model {try_model}: {exc}", flush=True)
+
                         # If a model is decommissioned or invalid, skip to the next active model
                         if (
                             "decommissioned" in exc_str
@@ -187,7 +190,6 @@ def stream_chat(
                                 flush=True,
                             )
                             break
-                        last_exc = exc
                         time.sleep(0.2)
                         continue
 
@@ -195,7 +197,9 @@ def stream_chat(
                     break
 
             if completion is None:
-                raise last_exc or RuntimeError("All API keys and fallback models failed.")
+                if last_exc:
+                    raise last_exc
+                raise RuntimeError("All API keys and fallback models failed.")
 
             text = ""
             # Streamed tool calls arrive in fragments keyed by `index`: the name
