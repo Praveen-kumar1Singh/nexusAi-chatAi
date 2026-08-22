@@ -12,7 +12,7 @@ import { sessionEmailOr503 } from "@/lib/route-session";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const AGENT_URL = process.env.AGENT_URL || "http://127.0.0.1:8000";
+const AGENT_URL = (process.env.AGENT_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 
 export async function POST(req: Request) {
   let body: unknown;
