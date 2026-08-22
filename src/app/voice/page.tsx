@@ -39,65 +39,147 @@ const PHASES: Record<CallPhase, { tone: string; ring: string; label: string; hin
     hint: "Stop talking for a moment and I'll answer.",
   },
   thinking: {
-    tone: "text-warning",
-    ring: "border-warning/50 bg-warning/10",
+    tone: "text-amber-500",
+    ring: "border-amber-500/50 bg-amber-500/10",
     label: "Thinking",
     hint: "Working out the answer…",
   },
   speaking: {
-    tone: "text-success",
-    ring: "border-success/50 bg-success/10",
+    tone: "text-emerald-500",
+    ring: "border-emerald-500/50 bg-emerald-500/10",
     label: "Speaking",
-    hint: "Tap the orb to cut in and talk over me.",
+    hint: "Speak over me to interrupt or say 'End Call'.",
   },
 };
 
-function Orb({ phase, onInterrupt }: { phase: CallPhase; onInterrupt: () => void }) {
+function AudioVisualizer({
+  active,
+  mode = "listening",
+}: {
+  active: boolean;
+  mode?: CallPhase;
+}) {
+  const barColors: Record<CallPhase, string> = {
+    idle: "bg-muted-foreground/30",
+    listening: "bg-gradient-to-t from-primary/60 to-primary",
+    thinking: "bg-gradient-to-t from-amber-500/60 to-amber-400 animate-pulse",
+    speaking: "bg-gradient-to-t from-emerald-500/60 to-emerald-400",
+  };
+
+  const colorClass = barColors[mode];
+
+  return (
+    <div className="flex items-center gap-1.5 h-10 justify-center my-3">
+      {[0.4, 0.7, 1.0, 0.6, 0.9, 0.5, 0.8, 0.6, 0.3].map((heightScale, i) => (
+        <span
+          key={i}
+          className={cn(
+            "w-1.5 rounded-full transition-all duration-200 shadow-xs",
+            colorClass,
+            active ? "animate-pulse" : "h-2 opacity-30",
+          )}
+          style={{
+            height: active ? `${Math.max(14, heightScale * 38)}px` : "6px",
+            animationDuration: `${0.35 + (i % 4) * 0.15}s`,
+            animationDelay: `${i * 0.08}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function Orb({
+  phase,
+  hasSpeechInput,
+  onInterrupt,
+}: {
+  phase: CallPhase;
+  hasSpeechInput: boolean;
+  onInterrupt: () => void;
+}) {
   const look = PHASES[phase];
   const live = phase !== "idle";
 
   return (
-    <button
-      onClick={phase === "speaking" ? onInterrupt : undefined}
-      disabled={phase !== "speaking"}
-      className="relative grid size-40 place-items-center rounded-full disabled:cursor-default sm:size-48"
-      aria-label={phase === "speaking" ? "Interrupt and speak" : look.label}
-    >
-      {/* Expanding rings, only while a call is actually running. */}
-      {live && (
-        <>
-          <span
+    <div className="relative flex flex-col items-center">
+      <button
+        onClick={phase === "speaking" ? onInterrupt : undefined}
+        disabled={phase !== "speaking"}
+        className="group relative grid size-44 place-items-center rounded-full disabled:cursor-default sm:size-52 transition-transform duration-300 active:scale-95"
+        aria-label={phase === "speaking" ? "Interrupt and speak" : look.label}
+      >
+        {/* Glow backdrop */}
+        {live && (
+          <div
             className={cn(
-              "absolute inset-0 animate-ping rounded-full border opacity-60",
-              look.ring,
+              "absolute -inset-4 rounded-full blur-2xl opacity-40 transition-all duration-700",
+              phase === "listening" && "bg-primary/30",
+              phase === "thinking" && "bg-amber-500/30",
+              phase === "speaking" && "bg-emerald-500/30",
             )}
-            style={{ animationDuration: "2.4s" }}
           />
-          <span
-            className={cn("absolute inset-4 animate-pulse rounded-full border", look.ring)}
-          />
-        </>
+        )}
+
+        {/* Expanding rings */}
+        {live && (
+          <>
+            <span
+              className={cn(
+                "absolute inset-0 animate-ping rounded-full border opacity-50",
+                look.ring,
+              )}
+              style={{ animationDuration: "2.5s" }}
+            />
+            <span
+              className={cn(
+                "absolute inset-3 animate-pulse rounded-full border opacity-70",
+                look.ring,
+              )}
+            />
+          </>
+        )}
+
+        <span
+          className={cn(
+            "absolute inset-6 rounded-full border-2 transition-all duration-500 backdrop-blur-xs shadow-xl",
+            look.ring,
+          )}
+        />
+
+        {/* Center Icon */}
+        <span className={cn("relative transition-all duration-500", look.tone)}>
+          {phase === "thinking" ? (
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="size-14 animate-spin text-amber-500" />
+            </div>
+          ) : phase === "speaking" ? (
+            <Volume2 className="size-14 text-emerald-500 animate-pulse" />
+          ) : phase === "listening" ? (
+            <Mic
+              className={cn(
+                "size-14 transition-transform duration-300",
+                hasSpeechInput && "scale-110 text-primary",
+              )}
+            />
+          ) : (
+            <Hexagon className="size-14 text-muted-foreground/60" />
+          )}
+        </span>
+      </button>
+
+      {/* Real-time Audio Waves */}
+      {live && (
+        <AudioVisualizer
+          active={
+            phase === "speaking" ||
+            phase === "thinking" ||
+            (phase === "listening" && hasSpeechInput)
+          }
+          mode={phase}
+        />
       )}
-
-      <span
-        className={cn(
-          "absolute inset-8 rounded-full border-2 transition-colors duration-500",
-          look.ring,
-        )}
-      />
-
-      <span className={cn("relative transition-colors duration-500", look.tone)}>
-        {phase === "thinking" ? (
-          <Loader2 className="size-12 animate-spin" />
-        ) : phase === "speaking" ? (
-          <Volume2 className="size-12" />
-        ) : phase === "listening" ? (
-          <Mic className="size-12" />
-        ) : (
-          <Hexagon className="size-12" />
-        )}
-      </span>
-    </button>
+    </div>
   );
 }
 
@@ -152,9 +234,16 @@ function VoiceCall() {
             </h2>
             <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
               {isPaidExpired ? (
-                <span>Your monthly subscription has expired. Please top up / renew your plan for <strong>₹299/month</strong> to restore Voice AI Chat access.</span>
+                <span>
+                  Your monthly subscription has expired. Please top up / renew your plan for{" "}
+                  <strong>₹299/month</strong> to restore Voice AI Chat access.
+                </span>
               ) : (
-                <span>Hands-free Voice AI Chat &amp; Speech Synthesis is an exclusive feature for Pro Monthly subscribers. Upgrade your plan for <strong>₹299/month</strong> to unlock unlimited voice calling.</span>
+                <span>
+                  Hands-free Voice AI Chat &amp; Speech Synthesis is an exclusive feature for Pro
+                  Monthly subscribers. Upgrade your plan for <strong>₹299/month</strong> to unlock
+                  unlimited voice calling.
+                </span>
               )}
             </p>
           </div>
@@ -165,7 +254,8 @@ function VoiceCall() {
               className="w-full sm:w-auto justify-center gap-2 py-2.5 px-5 text-xs font-semibold cursor-pointer shadow-md shadow-primary/25"
             >
               <Link href="/plans">
-                <Crown className="size-4 text-amber-300" /> {isPaidExpired ? "Top Up / Renew (₹299/mo)" : "Upgrade to Pro (₹299/mo)"}
+                <Crown className="size-4 text-amber-300" />{" "}
+                {isPaidExpired ? "Top Up / Renew (₹299/mo)" : "Upgrade to Pro (₹299/mo)"}
               </Link>
             </Button>
             <Button
@@ -187,32 +277,75 @@ function VoiceCall() {
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       {/* ---- the call itself ---- */}
-      <div className="flex shrink-0 flex-col items-center justify-center gap-6 px-6 py-10 lg:flex-1 lg:py-0">
+      <div className="flex shrink-0 flex-col items-center justify-center gap-5 px-6 py-8 lg:flex-1 lg:py-0">
         <div className="text-center">
-          <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-foreground">AI Voice Chat</h1>
+          <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+            AI Voice Chat
+          </h1>
           <p className="mt-1 text-xs sm:text-[13px] text-muted-foreground">
-            Speak to speak. Every call is saved as a normal conversation.
+            Hands-free conversation with real-time voice interruption and auto exit commands.
           </p>
         </div>
 
-        <Orb phase={call.phase} onInterrupt={call.interrupt} />
+        <Orb
+          phase={call.phase}
+          hasSpeechInput={Boolean(saying)}
+          onInterrupt={call.interrupt}
+        />
 
-        <div className="min-h-[76px] max-w-sm text-center">
-          <p className={cn("font-display text-base font-semibold", look.tone)}>{look.label}</p>
-          {saying ? (
-            <p className="mt-1.5 text-[13.5px] italic leading-relaxed text-foreground">
-              “{saying}”
+        <div className="min-h-[84px] max-w-md text-center flex flex-col items-center justify-center">
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-border bg-surface/80 shadow-2xs mb-2">
+            <span
+              className={cn(
+                "size-2 rounded-full",
+                call.phase === "speaking"
+                  ? "bg-emerald-500 animate-pulse"
+                  : call.phase === "thinking"
+                    ? "bg-amber-500 animate-ping"
+                    : call.phase === "listening"
+                      ? "bg-primary animate-pulse"
+                      : "bg-muted-foreground",
+              )}
+            />
+            <p className={cn("font-display text-xs font-semibold uppercase tracking-wider", look.tone)}>
+              {look.label}
             </p>
+          </div>
+
+          {saying ? (
+            <div className="mt-1 max-w-sm rounded-2xl border border-primary/30 bg-primary/5 px-4 py-2.5 shadow-xs animate-in fade-in zoom-in-95 duration-200">
+              <p className="text-[13.5px] italic leading-relaxed text-foreground font-medium">
+                “{saying}”
+              </p>
+            </div>
           ) : (
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
-              {look.hint}
+            <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+              {call.phase === "speaking" ? (
+                <span className="text-emerald-500 font-medium">
+                  AI is speaking... Speak to interrupt or say &ldquo;End Call&rdquo; to cut.
+                </span>
+              ) : call.phase === "thinking" ? (
+                <span className="text-amber-500 font-medium animate-pulse">
+                  Thinking and processing your answer...
+                </span>
+              ) : call.phase === "listening" ? (
+                <span>
+                  Speak anytime. Say <strong className="text-foreground font-semibold">&ldquo;End Call&rdquo;</strong> or <strong className="text-foreground font-semibold">&ldquo;Exit&rdquo;</strong> to disconnect.
+                </span>
+              ) : (
+                look.hint
+              )}
             </p>
           )}
         </div>
 
         <div className="flex items-center gap-3">
           {call.active ? (
-            <Button variant="destructive" onClick={call.end} className="gap-2 rounded-full px-6 shadow-md cursor-pointer">
+            <Button
+              variant="destructive"
+              onClick={call.end}
+              className="gap-2 rounded-full px-6 shadow-md cursor-pointer"
+            >
               <PhoneOff className="size-4" /> End call
             </Button>
           ) : (
@@ -221,7 +354,7 @@ function VoiceCall() {
               disabled={!call.supported}
               className="gap-2 rounded-full px-6 shadow-md cursor-pointer"
             >
-              <Mic className="size-4" /> Start message
+              <Mic className="size-4" /> Start call
             </Button>
           )}
 
