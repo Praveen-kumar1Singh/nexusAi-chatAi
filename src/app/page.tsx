@@ -121,6 +121,33 @@ function Turn({
   );
 }
 
+/** Stands in for a stored thread while it is on its way from the agent. */
+function ThreadSkeleton() {
+  return (
+    <div
+      className="mx-auto w-full max-w-3xl space-y-6 px-2.5 sm:px-4 py-4 sm:py-8 animate-pulse"
+      aria-busy="true"
+      aria-label="Loading conversation"
+    >
+      {[0, 1, 2].map((row) => (
+        <div key={row} className="space-y-4 sm:space-y-6">
+          <div className="flex justify-end">
+            <div className="h-9 w-[55%] rounded-2xl rounded-br-xs border border-border bg-elevated" />
+          </div>
+          <div className="flex gap-0 sm:gap-3">
+            <div className="hidden sm:block mt-0.5 size-7 shrink-0 rounded-lg bg-primary/12 ring-1 ring-primary/25" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="h-3.5 w-[92%] rounded-full bg-elevated" />
+              <div className="h-3.5 w-[78%] rounded-full bg-elevated" />
+              <div className="h-3.5 w-[60%] rounded-full bg-elevated" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Welcome({ onPick }: { onPick: (prompt: string) => void }) {
   const quickPills = [
     { label: "Search Web", prompt: "What are the latest tech news and developments today?", icon: Globe },
@@ -164,7 +191,7 @@ function Welcome({ onPick }: { onPick: (prompt: string) => void }) {
 
 function Chat() {
   const { user } = useSession();
-  const { messages, isLoading, send, conversationId, open, reset } = useChat();
+  const { messages, isLoading, isOpening, send, open, reset } = useChat();
   const [input, setInput] = useState("");
   const [scrollMode, setScrollMode] = useState<"up" | "down">("up");
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -272,7 +299,9 @@ function Chat() {
   return (
     <div className="relative flex flex-col flex-1 min-h-0">
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto flex flex-col">
-        {messages.length === 0 ? (
+        {isOpening && messages.length === 0 ? (
+          <ThreadSkeleton />
+        ) : messages.length === 0 ? (
           <Welcome onPick={handleSend} />
         ) : (
           <div className="mx-auto w-full max-w-3xl space-y-4 sm:space-y-6 px-2.5 sm:px-4 py-4 sm:py-8">

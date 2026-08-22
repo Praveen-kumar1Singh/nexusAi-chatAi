@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AUTH_CHANGED_EVENT, decrementLocalCredit, refreshCurrentUser } from "@/lib/auth";
 import { CONVERSATIONS_CHANGED, type Message } from "@/lib/types";
 
@@ -23,30 +23,72 @@ export function useChat() {
   // Assigned by the agent on the first turn; sent back on every later turn so
   // the whole thread lands in one stored conversation.
   const [conversationId, setConversationId] = useState<string | null>(null);
+  // True between clicking a thread in the sidebar and its turns arriving, so
+  // the view can show a placeholder instead of sitting on the previous thread.
+  const [isOpening, setIsOpening] = useState(false);
+
+  // Threads already fetched this session. Reopening one paints from here
+  // immediately and the network copy just refreshes it underneath.
+  const cache = useRef(new Map<string, Message[]>());
+  // The thread the user last asked for. A slow response for an earlier click
+  // must not overwrite a later one.
+  const wanted = useRef<string | null>(null);
 
   /** Load a stored conversation into the view. */
   const open = useCallback(async (id: string) => {
-    const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
-    if (!res.ok) return;
-    const data = (await res.json()) as {
-      messages: { role: Message["role"]; content: string; tools?: Message["tools"] }[];
-    };
+    wanted.current = id;
     setConversationId(id);
-    setMessages(data.messages.map((m) => ({ ...m, tools: m.tools ?? [] })));
+
+    const cached = cache.current.get(id);
+    if (cached) {
+      setMessages(cached);
+      setIsOpening(false);
+    } else {
+      setMessages([]);
+      setIsOpening(true);
+    }
+
+    try {
+      const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        messages: { role: Message["role"]; content: string; tools?: Message["tools"] }[];
+      };
+      const loaded = data.messages.map((m) => ({ ...m, tools: m.tools ?? [] }));
+      cache.current.set(id, loaded);
+      if (wanted.current === id) setMessages(loaded);
+    } catch {
+      // Leave whatever is on screen rather than blanking it on a network blip.
+    } finally {
+      if (wanted.current === id) setIsOpening(false);
+    }
   }, []);
 
   /** Clear the view and start a fresh thread on the next send. */
   const reset = useCallback(() => {
+    wanted.current = null;
+    setIsOpening(false);
     setConversationId(null);
     setMessages([]);
   }, []);
+
+  // Keep the cache current so switching away and back does not refetch a thread
+  // whose newest turns this window already has.
+  useEffect(() => {
+    if (!conversationId || isLoading || messages.length === 0) return;
+    cache.current.set(conversationId, messages);
+  }, [conversationId, isLoading, messages]);
 
   // Signing in or out empties the window: a guest's turns are never stored
   // anywhere, so leaving them on screen would show the next account a thread it
   // has no way to reopen.
   useEffect(() => {
-    window.addEventListener(AUTH_CHANGED_EVENT, reset);
-    return () => window.removeEventListener(AUTH_CHANGED_EVENT, reset);
+    function onAuthChange() {
+      cache.current.clear();
+      reset();
+    }
+    window.addEventListener(AUTH_CHANGED_EVENT, onAuthChange);
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChange);
   }, [reset]);
 
   async function send(text: string, opts?: { voice?: boolean }) {
@@ -55,6 +97,9 @@ export function useChat() {
 
     const history = [...messages, { role: "user" as const, content: prompt }];
     const initialTurn: Message[] = [...history, { role: "assistant", content: "" }];
+    // A thread still being fetched must not land on top of the turn just typed.
+    wanted.current = null;
+    setIsOpening(false);
     setMessages(initialTurn);
     setIsLoading(true);
     decrementLocalCredit();
@@ -165,5 +210,5 @@ export function useChat() {
     }
   }
 
-  return { messages, isLoading, send, conversationId, open, reset };
+  return { messages, isLoading, isOpening, send, conversationId, open, reset };
 }

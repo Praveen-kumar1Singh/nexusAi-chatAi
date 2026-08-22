@@ -63,7 +63,9 @@ def _get_db():
             _db = _mongo_client[MONGODB_DB]
             _db.conversations.create_index("id", unique=True)
             _db.users.create_index("email", unique=True)
-            _db.conversations.create_index("user_email")
+            # Compound so the sidebar's "mine, newest first" query is served
+            # straight off the index instead of sorting in memory.
+            _db.conversations.create_index([("user_email", 1), ("updated_at", -1)])
             print("[MongoDB] Connected successfully to Atlas database:", MONGODB_DB)
             return _db
         except Exception as err:
@@ -204,7 +206,13 @@ def append_message(
     db = _get_db()
     if db is not None:
         try:
-            doc = db.conversations.find_one({"id": conversation_id}, {"messages": 1, "title": 1})
+            # Only the tail matters here: the user turn this reply answers was
+            # appended moments ago. Pulling the full array would grow the cost
+            # of every single turn with the length of the thread.
+            doc = db.conversations.find_one(
+                {"id": conversation_id},
+                {"messages": {"$slice": -6}, "title": 1},
+            )
             update_payload: Dict[str, Any] = {
                 "$push": {"messages": new_msg},
                 "$set": {"updated_at": now_ts},
@@ -272,7 +280,20 @@ def list_conversations(user_email: Optional[str] = None) -> List[Dict[str, Any]]
     db = _get_db()
     if db is not None:
         try:
-            cursor = db.conversations.find({"user_email": owner}, {"_id": 0, "id": 1, "title": 1, "created_at": 1, "updated_at": 1, "messages": 1}).sort("updated_at", -1)
+            # Count the messages server-side. Projecting the array itself would
+            # drag every message body of every thread over the wire just to
+            # call len() on it -- the sidebar only shows titles.
+            cursor = db.conversations.find(
+                {"user_email": owner},
+                {
+                    "_id": 0,
+                    "id": 1,
+                    "title": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "message_count": {"$size": {"$ifNull": ["$messages", []]}},
+                },
+            ).sort("updated_at", -1)
             rows = []
             for c in cursor:
                 rows.append({
@@ -280,7 +301,7 @@ def list_conversations(user_email: Optional[str] = None) -> List[Dict[str, Any]]
                     "title": c.get("title", "New conversation"),
                     "created_at": c.get("created_at", _now()),
                     "updated_at": c.get("updated_at", _now()),
-                    "message_count": len(c.get("messages", [])),
+                    "message_count": c.get("message_count", 0),
                 })
             return rows
         except Exception as err:
