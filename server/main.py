@@ -9,20 +9,25 @@ State lives in store.py -- in memory, for now. Every endpoint below returns real
 data produced by the running system; there are no fixtures.
 """
 
+import os
 from pathlib import Path
 from typing import List, Optional
 
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 # pyrefly: ignore [missing-import]
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field
 
-# The key lives in the Next.js .env.local one directory up -- one key, one place.
+# Locally the key lives in the Next.js .env.local one directory up -- one key,
+# one place. Deployed (Render), the platform sets real environment variables and
+# neither file exists; load_dotenv is a no-op then, and never overwrites what is
+# already in the environment.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import llm  # noqa: E402
 import store  # noqa: E402
@@ -31,6 +36,27 @@ from agent import stream_chat  # noqa: E402  (needs env loaded first)
 from tools import registry  # noqa: E402
 
 app = FastAPI(title="Nexus AI agent", version="1.0.0")
+
+
+# Shared secret between the Next.js proxy and this service.
+#
+# It matters once the two halves are deployed apart: this host is then reachable
+# from the open internet, and `x-user-email` below is trusted as given -- so
+# without a gate anyone could name someone else's account and read their
+# conversations. Unset (local dev, both halves on one machine) the check is
+# inert, so nothing about running locally changes.
+AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "").strip()
+
+# Reachable without the token, so Render's health check and a quick curl work.
+OPEN_PATHS = {"/health", "/docs", "/openapi.json"}
+
+
+@app.middleware("http")
+async def require_agent_token(request: Request, call_next):
+    if AGENT_TOKEN and request.url.path not in OPEN_PATHS:
+        if request.headers.get("x-agent-token", "") != AGENT_TOKEN:
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+    return await call_next(request)
 
 
 class Message(BaseModel):
@@ -84,6 +110,7 @@ def health():
         # Masked, so the rotation is visible without printing a usable secret.
         "keys": [llm.fingerprint(key) for key in keys],
         "storage": "mongodb-atlas",
+        "auth_required": bool(AGENT_TOKEN),
         "speech": tts.status(),
     }
 

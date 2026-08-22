@@ -1,0 +1,37 @@
+# Render blueprint for the Python half of the app.
+#
+# Only `server/` deploys here -- the Next.js half lives on Vercel and reaches
+# this service over AGENT_URL. Create it with: New > Blueprint, point Render at
+# this repo, then fill in the secrets marked `sync: false` below.
+services:
+  - type: web
+    name: nexus-agent
+    runtime: python
+    plan: starter          # `free` sleeps after 15 min; see DEPLOY.md before choosing it.
+    region: singapore      # closest to Mongo Atlas / your users -- change if yours differ.
+    rootDir: server
+    buildCommand: pip install -r requirements.txt
+    # $PORT is assigned by Render; binding 0.0.0.0 is what makes it reachable.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Secrets: set these in the Render dashboard, they are never committed.
+      - key: LLM_API_KEY
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      # Shared with Vercel -- same value in both places, or every call 401s.
+      - key: AGENT_TOKEN
+        generateValue: true
+      - key: MONGODB_DB
+        value: mantraa_ai
+      - key: LLM_MODEL
+        value: openai/gpt-oss-120b
+      - key: TOPIC_POLICY
+        value: "off"
+      - key: ASSISTANT_NAME
+        value: Nexus
+      - key: LANGSMITH_TRACING
+        value: "false"

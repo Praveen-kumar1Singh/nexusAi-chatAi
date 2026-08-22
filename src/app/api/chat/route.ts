@@ -6,7 +6,7 @@
  * and the agent host stays private to the server.
  */
 
-import { userHeader } from "@/lib/agent";
+import { agentAuth, userHeader } from "@/lib/agent";
 import { sessionEmailOr503 } from "@/lib/route-session";
 
 export const runtime = "nodejs";
@@ -110,7 +110,11 @@ export async function POST(req: Request) {
     upstream = await fetch(`${AGENT_URL}/chat`, {
       method: "POST",
       // The account header decides whether this turn is stored at all.
-      headers: { "Content-Type": "application/json", ...userHeader(session.email) },
+      headers: {
+        "Content-Type": "application/json",
+        ...agentAuth(),
+        ...userHeader(session.email),
+      },
       body: JSON.stringify(body),
       // Stream the response through instead of buffering it.
       // @ts-expect-error -- `duplex` is required by undici for streaming bodies.

@@ -6,7 +6,7 @@
  * off the client -- same arrangement as /api/chat.
  */
 
-import { AGENT_DOWN, AGENT_URL, proxyJson } from "@/lib/agent";
+import { AGENT_DOWN, AGENT_URL, agentAuth, proxyJson } from "@/lib/agent";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
   try {
     upstream = await fetch(`${AGENT_URL}/tts`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...agentAuth() },
       body: JSON.stringify(body),
       cache: "no-store",
     });
