@@ -140,13 +140,25 @@ def stream_chat(
             )
             # Attempt API call with multi-key and multi-model fallback retry on rate limits or model errors
             completion = None
+            # Two constraints decide this list, and they cut it down hard.
+            #
+            # Every entry must accept a `tools` parameter, because the call below
+            # always sends one: groq/compound, compound-mini and allam-2-7b all
+            # answer a tools request with a 400 rather than ignoring it, so they
+            # cannot stand in here however capable they otherwise are.
+            #
+            # And every entry must be on Groq's *production* list. qwen/qwen3.6-27b
+            # is the other documented replacement for the retired llama-3.3-70b,
+            # but it ships as Preview -- "may be discontinued at short notice" --
+            # and a preview model in a fallback chain is what lands us back here
+            # in six months. It also took a tools request without ever calling one.
+            #
+            # The previous list had gone dead in its entirety, which is why a
+            # failed turn surfaced "qwen-2.5-coder-32b has been decommissioned":
+            # the last corpse in the queue, not the cause.
             groq_models = [
-                "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant",
-                "llama3-70b-8192",
-                "llama3-8b-8192",
-                "mixtral-8x7b-32768",
-                "qwen-2.5-coder-32b",
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
             ]
             models_to_try = [model]
             if provider.name == "groq":

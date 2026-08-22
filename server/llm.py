@@ -42,11 +42,53 @@ class Provider(NamedTuple):
 PROVIDERS: List[Provider] = [
     Provider("openrouter", "sk-or-", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
     Provider("anthropic", "sk-ant-", "https://api.anthropic.com/v1", "claude-sonnet-4-5"),
-    Provider("groq", "gsk_", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    Provider("groq", "gsk_", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
     Provider("openai", "sk-", "https://api.openai.com/v1", "gpt-4.1-mini"),
 ]
 
 UNKNOWN = Provider("custom", "", "", "")
+
+# Groq retires checkpoints on a rolling basis, and a stale LLM_MODEL left in a
+# dashboard is the usual cause of a deploy that 400s on every single turn --
+# which is exactly how this list came to be written. Taken from Groq's published
+# deprecation history; every id here is past its shutdown date, so point them at
+# the current default rather than letting the request fail.
+GROQ_RETIRED = {
+    # 08/16/26 -- the pair that took production down; gpt-oss is the named
+    # replacement for both.
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    # 07/17/26
+    "qwen/qwen3-32b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+    # 04/15/26 and earlier
+    "moonshotai/kimi-k2-instruct-0905",
+    "moonshotai/kimi-k2-instruct",
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "deepseek-r1-distill-llama-70b",
+    "deepseek-r1-distill-qwen-32b",
+    "deepseek-r1-distill-llama-70b-specdec",
+    "gemma2-9b-it",
+    "gemma-7b-it",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "llama3-groq-70b-8192-tool-use-preview",
+    "llama3-groq-8b-8192-tool-use-preview",
+    "mistral-saba-24b",
+    "mixtral-8x7b-32768",
+    "qwen-qwq-32b",
+    "qwen-2.5-32b",
+    "qwen-2.5-coder-32b",
+    "llama-3.3-70b-specdec",
+    "llama-3.1-70b-versatile",
+    "llama-3.1-70b-specdec",
+    "llama-3.2-1b-preview",
+    "llama-3.2-3b-preview",
+    "llama-3.2-11b-vision-preview",
+    "llama-3.2-90b-vision-preview",
+    "llama-3.2-90b-text-preview",
+    "llama-3.2-11b-text-preview",
+}
 
 # Checked in order, so an explicit LLM_API_KEY wins over a leftover vendor key.
 KEY_VARS = ("LLM_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
@@ -141,9 +183,11 @@ def resolve() -> Tuple[Optional[str], Provider]:
         or os.environ.get("GROQ_MODEL", "").strip()
         or found.model
     )
-    # Auto-correct invalid/deprecated gpt-oss-120b model name on Groq
-    if found.name == "groq" and "gpt-oss-120b" in env_model:
-        env_model = "llama-3.3-70b-versatile"
+    # This used to run the other way round -- rewriting gpt-oss-120b, which Groq
+    # serves, into llama-3.3-70b-versatile, which it since retired -- so a
+    # correct LLM_MODEL was turned into a dead one on every request.
+    if found.name == "groq" and env_model in GROQ_RETIRED:
+        env_model = found.model
 
     return key, found._replace(
         base_url=os.environ.get("LLM_BASE_URL", "").strip() or found.base_url,
