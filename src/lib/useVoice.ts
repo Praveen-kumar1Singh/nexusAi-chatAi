@@ -44,6 +44,19 @@ const noSubscribe = () => () => {};
 const hasRecognition = () => recognitionCtor() !== null;
 const noRecognitionOnServer = () => false;
 
+/**
+ * Recognition errors a retry cannot fix. Everything else -- `no-speech` above
+ * all, which is just what the recogniser calls a quiet stretch -- is routine and
+ * clears the moment the mic is reopened, so a caller running a hands-free loop
+ * should reopen rather than give up.
+ */
+const FATAL_INPUT_ERRORS = new Set(["not-allowed", "service-not-allowed", "audio-capture"]);
+
+/** Is this recognition error worth abandoning the session for? */
+export function isFatalInputError(code: string | null): boolean {
+  return code !== null && FATAL_INPUT_ERRORS.has(code);
+}
+
 /** Recognition error codes, in words the person at the keyboard can act on. */
 const INPUT_ERRORS: Record<string, string> = {
   "not-allowed": "Microphone blocked. Allow it for this site in your browser settings.",
@@ -82,6 +95,8 @@ export function useVoiceInput({
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** The raw code behind `error`, for callers that treat some as recoverable. */
+  const [errorCode, setErrorCode] = useState<string | null>(null);
 
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   // The composer rebuilds callbacks every render. Holding the latest in a ref
@@ -105,6 +120,7 @@ export function useVoiceInput({
 
     rec.onstart = () => {
       setError(null);
+      setErrorCode(null);
       setListening(true);
     };
 
@@ -125,6 +141,7 @@ export function useVoiceInput({
     rec.onerror = (event) => {
       // `aborted` only ever means we called stop()/abort() ourselves.
       if (event.error === "aborted") return;
+      setErrorCode(event.error);
       setError(INPUT_ERRORS[event.error] ?? `Voice input failed (${event.error}).`);
     };
 
@@ -151,6 +168,7 @@ export function useVoiceInput({
     const rec = recognition.current;
     if (!rec) return;
     setError(null);
+    setErrorCode(null);
     try {
       rec.start();
     } catch {
@@ -163,7 +181,7 @@ export function useVoiceInput({
     else start();
   }, [listening, start, stop]);
 
-  return { supported, listening, interim, error, start, stop, toggle };
+  return { supported, listening, interim, error, errorCode, start, stop, toggle };
 }
 
 /* -------------------------------------------------------------------------- */

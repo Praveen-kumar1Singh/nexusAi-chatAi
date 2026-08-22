@@ -48,7 +48,7 @@ const PHASES: Record<CallPhase, { tone: string; ring: string; label: string; hin
     tone: "text-emerald-500",
     ring: "border-emerald-500/50 bg-emerald-500/10",
     label: "Speaking",
-    hint: "Speak over me to interrupt or say 'End Call'.",
+    hint: "Tap the orb to interrupt me.",
   },
 };
 

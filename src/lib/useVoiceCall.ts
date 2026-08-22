@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { joinSpoken, useSpeech, useVoiceInput } from "@/lib/useVoice";
+import { isFatalInputError, joinSpoken, useSpeech, useVoiceInput } from "@/lib/useVoice";
 import type { Message } from "@/lib/types";
 
 /**
@@ -181,26 +181,18 @@ export function useVoiceCall(chat: {
       const trimmed = chunk.trim();
       if (!trimmed) return;
 
-      // 1. Voice Exit/Cut Call Command check
+      // The mic is shut for the whole thinking-and-speaking stretch, so anything
+      // arriving here is the user -- never the agent's own reply coming back in
+      // through the speakers.
+      if (phaseRef.current !== "listening") return;
+
+      // Hang up on request: "end call", "cut call", "call band karo", "bye".
       if (isExitCommand(trimmed) || isExitCommand(pending.current + " " + trimmed)) {
         endRef.current();
         return;
       }
 
-      // 2. Voice Interruption (Barge-in): User speaks while AI is speaking
-      if (phaseRef.current === "speaking") {
-        stopSpeech(); // Instantly cut off AI audio playback!
-        if (isFinal) {
-          pending.current = joinSpoken(pending.current, trimmed);
-          setHeard(pending.current);
-          clearSilence();
-          silence.current = setTimeout(() => flushRef.current(), SILENCE_MS);
-        }
-        return;
-      }
-
-      // 3. Normal listening state
-      if (phaseRef.current === "listening" && isFinal) {
+      if (isFinal) {
         pending.current = joinSpoken(pending.current, trimmed);
         setHeard(pending.current);
         clearSilence();
@@ -211,6 +203,14 @@ export function useVoiceCall(chat: {
   });
 
   const { start: startMic, stop: stopMic, listening, error: micError } = voice;
+
+  /**
+   * `no-speech` is simply what the recogniser reports for a quiet stretch, and a
+   * hands-free call is full of them -- reopening the mic clears it. Only a
+   * blocked or missing device is worth dropping the call for, so the rest of
+   * this hook keys off `micFatal` rather than the presence of any error at all.
+   */
+  const micFatal = isFatalInputError(voice.errorCode);
 
   /** Send whatever has been heard; the stream opening moves us to "thinking". */
   const flush = useCallback(() => {
@@ -229,18 +229,22 @@ export function useVoiceCall(chat: {
   }, [flush]);
 
   /**
-   * Mic follows phase: open during "listening" AND "speaking" so user can talk over
-   * the agent to interrupt (barge-in) or give exit commands ("end call").
-   * Shut only during "thinking" while waiting for response stream.
+   * Mic follows phase: open while "listening", shut for everything else.
+   *
+   * It has to stay shut while the agent speaks. There is no echo cancellation
+   * between the audio element and the recogniser, so an open mic transcribes the
+   * reply coming out of the speakers and feeds it straight back in -- which both
+   * cut the answer off mid-sentence and, when the reply happened to contain a
+   * word like "bye", hung up the call.
    */
   useEffect(() => {
-    if (phase === "listening" || phase === "speaking") {
-      if (listening || micError) return;
+    if (phase === "listening") {
+      if (listening || micFatal) return;
       const timer = setTimeout(startMic, REOPEN_MS);
       return () => clearTimeout(timer);
     }
-    if (phase === "thinking" && listening) stopMic();
-  }, [phase, listening, micError, startMic, stopMic]);
+    if (listening) stopMic();
+  }, [phase, listening, micFatal, startMic, stopMic]);
 
   /** Read each finished reply out loud, once. */
   const spoken = useRef<string | null>(null);
@@ -279,10 +283,11 @@ export function useVoiceCall(chat: {
   }, [stopSpeech]);
 
   // A blocked mic cannot be recovered by retrying; drop the call so the page can
-  // show why instead of sitting in "listening" forever.
+  // show why instead of sitting in "listening" forever. Recoverable errors are
+  // deliberately excluded -- see micFatal.
   useEffect(() => {
-    if (micError && activeRef.current) end();
-  }, [micError, end]);
+    if (micFatal && activeRef.current) end();
+  }, [micFatal, end]);
 
   // Unmount only. Held in a ref so this never depends on `end`'s identity --
   // leaving a call running is not something a re-render should be able to undo.
@@ -300,7 +305,8 @@ export function useVoiceCall(chat: {
     /** Words still being decided, straight from the recogniser. */
     interim: voice.interim,
     supported: voice.supported,
-    micError,
+    /** Only errors the call cannot recover from; a quiet stretch is not one. */
+    micError: micFatal ? micError : null,
     speechError: speech.error,
     /** Null until status is checked; false when neither KittenTTS nor browser TTS is available. */
     speechAvailable: speech.available,
