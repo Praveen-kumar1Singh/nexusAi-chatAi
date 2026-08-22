@@ -12,7 +12,8 @@ import { sessionEmailOr503 } from "@/lib/route-session";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const AGENT_URL = (process.env.AGENT_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+const rawAgentUrl = (process.env.AGENT_URL || "http://127.0.0.1:8000").trim();
+const AGENT_URL = rawAgentUrl.replace(/\/+(chat|api)?\/*$/, "").replace(/\/+$/, "");
 
 export async function POST(req: Request) {
   let body: unknown;

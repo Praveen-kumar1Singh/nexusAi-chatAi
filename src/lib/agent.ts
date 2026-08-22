@@ -3,7 +3,8 @@
  * Only ever imported from route handlers, so AGENT_URL stays off the client.
  */
 
-const AGENT_URL = (process.env.AGENT_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+const rawAgentUrl = (process.env.AGENT_URL || "http://127.0.0.1:8000").trim();
+const AGENT_URL = rawAgentUrl.replace(/\/+(chat|api)?\/*$/, "").replace(/\/+$/, "");
 
 export const AGENT_DOWN =
   `Cannot reach the Python agent. Start it with: npm run dev:api`;
