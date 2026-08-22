@@ -130,7 +130,7 @@ function Welcome({ onPick }: { onPick: (prompt: string) => void }) {
   ];
 
   return (
-    <div className="flex min-h-full flex-1 flex-col items-center justify-center max-w-2xl mx-auto px-4 text-center py-6 sm:py-8 my-auto animate-in fade-in zoom-in-95 duration-300">
+    <div className="flex w-full flex-1 flex-col items-center justify-center max-w-2xl mx-auto px-4 text-center py-4 sm:py-8 my-auto animate-in fade-in zoom-in-95 duration-300">
       {/* Modern Badge */}
       <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary shadow-2xs backdrop-blur-md mb-4 animate-in fade-in duration-500">
         <Sparkles className="size-3.5 text-primary animate-pulse" />
@@ -306,38 +306,40 @@ function Chat() {
         </div>
       )}
 
-      {isGuestLimitReached ? (
-        <div className="mx-auto w-full max-w-3xl px-4 py-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-primary/40 bg-sidebar/95 p-5 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="flex items-center gap-3 text-left">
-              <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
-                <UserPlus className="size-5 text-primary" />
+      <div className="sticky bottom-0 z-20 shrink-0 bg-background/95 backdrop-blur-xs w-full">
+        {isGuestLimitReached ? (
+          <div className="mx-auto w-full max-w-3xl px-3 sm:px-4 py-3 sm:py-4">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-primary/40 bg-sidebar/95 p-4 sm:p-5 shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className="flex items-center gap-3 text-left">
+                <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
+                  <UserPlus className="size-5 text-primary" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-bold font-display uppercase tracking-wider text-primary">
+                    Guest Limit Reached (10/10 Prompts Used)
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Create a free account or log in to get <strong>50 free credits</strong>, save your conversation history, and continue chatting.
+                  </p>
+                </div>
               </div>
-              <div className="space-y-1">
-                <p className="text-xs font-bold font-display uppercase tracking-wider text-primary">
-                  Guest Limit Reached (10/10 Prompts Used)
-                </p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Create a free account or log in to get <strong>50 free credits</strong>, save your conversation history, and continue chatting.
-                </p>
-              </div>
+              <Button
+                onClick={() => setAuthModalOpen(true)}
+                className="w-full sm:w-auto shrink-0 justify-center gap-2 py-2.5 px-5 text-xs font-semibold cursor-pointer shadow-md shadow-primary/25"
+              >
+                <Sparkles className="size-3.5 text-amber-300" /> Create Free Account / Log In
+              </Button>
             </div>
-            <Button
-              onClick={() => setAuthModalOpen(true)}
-              className="w-full sm:w-auto shrink-0 justify-center gap-2 py-2.5 px-5 text-xs font-semibold cursor-pointer shadow-md shadow-primary/25"
-            >
-              <Sparkles className="size-3.5 text-amber-300" /> Create Free Account / Log In
-            </Button>
           </div>
-        </div>
-      ) : (
-        <PromptComposer
-          value={input}
-          onChange={setInput}
-          onSend={(attachments) => handleSend(input, attachments)}
-          speech={speech}
-        />
-      )}
+        ) : (
+          <PromptComposer
+            value={input}
+            onChange={setInput}
+            onSend={(attachments) => handleSend(input, attachments)}
+            speech={speech}
+          />
+        )}
+      </div>
 
       <AuthModal
         open={authModalOpen}
