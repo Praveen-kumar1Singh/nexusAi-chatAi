@@ -59,6 +59,27 @@ function cleanTitle(rawTitle: string): string {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
+const CACHED_CONVERSATIONS_KEY = "nexus_cached_conversations";
+
+function getStoredConversations(): Conversation[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(CACHED_CONVERSATIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setStoredConversations(conversations: Conversation[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(CACHED_CONVERSATIONS_KEY, JSON.stringify(conversations));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 export function AppSidebar({
   collapsed,
   onToggle,
@@ -69,7 +90,7 @@ export function AppSidebar({
   onItemClick?: () => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>(getStoredConversations);
   const pathname = usePathname();
   const router = useRouter();
   const onChatPage = pathname === "/";
@@ -97,7 +118,10 @@ export function AppSidebar({
       fetch("/api/conversations", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((data: { conversations?: Conversation[] } | null) => {
-          if (data) setConversations(data.conversations ?? []);
+          if (data?.conversations) {
+            setConversations(data.conversations);
+            setStoredConversations(data.conversations);
+          }
         })
         // Agent offline -- leave the list empty rather than breaking the shell.
         .catch(() => {}),
@@ -119,6 +143,9 @@ export function AppSidebar({
     function onAuthChange() {
       setActiveId(null);
       setConversations([]);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(CACHED_CONVERSATIONS_KEY);
+      }
     }
     window.addEventListener(AUTH_CHANGED_EVENT, onAuthChange);
     return () => window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChange);
@@ -129,6 +156,11 @@ export function AppSidebar({
       const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
       if (res.ok) {
         if (id === activeId) selectThread(null);
+        setConversations((prev) => {
+          const next = prev.filter((c) => c.id !== id);
+          setStoredConversations(next);
+          return next;
+        });
         load();
         showToast("Conversation deleted successfully", "success");
       } else {

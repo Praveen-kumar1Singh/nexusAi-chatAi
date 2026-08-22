@@ -18,27 +18,65 @@ export const AUTH_CHANGED_EVENT = "auth:changed";
 /** Fired whenever credit counts update in real-time. */
 export const CREDITS_CHANGED_EVENT = "credits:changed";
 
+const SESSION_STORAGE_KEY = "nexus_user_session";
+
+function getStoredUser(): CurrentUser | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setStoredUser(user: CurrentUser | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (user) {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
 /**
- * The session lives in an httpOnly cookie, so client code cannot read who is
- * signed in -- it has to ask the server. This module-level cache keeps every
- * component that mounts from firing its own request.
+ * Module-level session cache. Seeded from localStorage on startup so page refresh
+ * never flashes a logged-out state or loses the session during network delay.
  */
-let cached: CurrentUser | null = null;
+let cached: CurrentUser | null = getStoredUser();
 let inFlight: Promise<CurrentUser | null> | null = null;
-let loadedOnce = false;
+let loadedOnce = cached !== null;
 
 async function fetchUser(): Promise<CurrentUser | null> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch("/api/auth/me", { cache: "no-store", signal: timer ? controller.signal : undefined }).catch(() => null);
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch("/api/auth/me", {
+      cache: "no-store",
+      signal: controller.signal,
+    }).catch(() => null);
     clearTimeout(timer);
-    const data = res && res.ok ? await res.json().catch(() => null) : null;
-    cached = data?.user ?? null;
+
+    if (res) {
+      if (res.ok) {
+        const data = (await res.json().catch(() => null)) as { user?: CurrentUser | null } | null;
+        if (data && "user" in data) {
+          cached = data.user ?? null;
+          setStoredUser(cached);
+        }
+      } else if (res.status === 401) {
+        // Explicitly unauthorized session
+        cached = null;
+        setStoredUser(null);
+      }
+      // On 500/502/503 server errors, keep existing stored user session
+    }
   } catch {
-    // Offline or the route is down -- treat as signed out rather than throwing
-    // inside a render tree.
-    cached = null;
+    // On network failure or timeout, retain cached localStorage user rather than logging out
   }
   loadedOnce = true;
   return cached;
@@ -60,6 +98,7 @@ export function decrementLocalCredit(): void {
       ...cached,
       credits: cached.credits - 1,
     };
+    setStoredUser(cached);
     window.dispatchEvent(new Event(CREDITS_CHANGED_EVENT));
   }
 }
@@ -69,6 +108,10 @@ export async function logout(): Promise<void> {
   await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
   cached = null;
   loadedOnce = true;
+  setStoredUser(null);
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("nexus_cached_conversations");
+  }
   window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
