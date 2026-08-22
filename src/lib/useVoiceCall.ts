@@ -56,6 +56,16 @@ export function detectLanguage(text: string): CallLanguage | null {
   return (text.match(DEVANAGARI)?.length ?? 0) / letters >= 0.2 ? "hi-IN" : "en-US";
 }
 
+/**
+ * Voice commands that automatically cut / end the active call.
+ * Supports English and Hindi phrasing ("end call", "exit", "cut call", "call band karo", "bye", etc.)
+ */
+const EXIT_COMMAND_PATTERN = /(?:^|\s)(?:end\s*(?:the\s*)?call|exit|cut\s*(?:the\s*)?call|stop\s*(?:the\s*)?call|hang\s*up|bye|goodbye|call\s*end|call\s*cut|call\s*band|band\s*karo|exit\s*call|close\s*call|end\s*voice|disconnect)(?:\s|$)/i;
+
+export function isExitCommand(text: string): boolean {
+  return EXIT_COMMAND_PATTERN.test(text.trim());
+}
+
 /** Support is fixed for the life of the page, so there is nothing to subscribe to. */
 const noSubscribe = () => () => {};
 
@@ -166,17 +176,38 @@ export function useVoiceCall(chat: {
 
   const voice = useVoiceInput({
     lang,
-    onFinal: (chunk) => {
-      // Anything captured while thinking or speaking is either the agent's own
-      // voice or the user talking over it. Neither belongs in the next message.
-      if (!activeRef.current || phaseRef.current !== "listening") return;
+    onChunk: (chunk, isFinal) => {
+      if (!activeRef.current) return;
+      const trimmed = chunk.trim();
+      if (!trimmed) return;
 
-      pending.current = joinSpoken(pending.current, chunk);
-      setHeard(pending.current);
+      // 1. Voice Exit/Cut Call Command check
+      if (isExitCommand(trimmed) || isExitCommand(pending.current + " " + trimmed)) {
+        endRef.current();
+        return;
+      }
 
-      clearSilence();
-      silence.current = setTimeout(() => flushRef.current(), SILENCE_MS);
+      // 2. Voice Interruption (Barge-in): User speaks while AI is speaking
+      if (phaseRef.current === "speaking") {
+        stopSpeech(); // Instantly cut off AI audio playback!
+        if (isFinal) {
+          pending.current = joinSpoken(pending.current, trimmed);
+          setHeard(pending.current);
+          clearSilence();
+          silence.current = setTimeout(() => flushRef.current(), SILENCE_MS);
+        }
+        return;
+      }
+
+      // 3. Normal listening state
+      if (phaseRef.current === "listening" && isFinal) {
+        pending.current = joinSpoken(pending.current, trimmed);
+        setHeard(pending.current);
+        clearSilence();
+        silence.current = setTimeout(() => flushRef.current(), SILENCE_MS);
+      }
     },
+    onFinal: () => {},
   });
 
   const { start: startMic, stop: stopMic, listening, error: micError } = voice;
@@ -198,17 +229,17 @@ export function useVoiceCall(chat: {
   }, [flush]);
 
   /**
-   * The mic follows the phase: open whenever it is the user's turn, shut
-   * otherwise. Recognition also ends itself every so often, which this reopens.
+   * Mic follows phase: open during "listening" AND "speaking" so user can talk over
+   * the agent to interrupt (barge-in) or give exit commands ("end call").
+   * Shut only during "thinking" while waiting for response stream.
    */
   useEffect(() => {
-    if (phase === "listening") {
-      // A denied or missing mic would otherwise become a restart loop.
+    if (phase === "listening" || phase === "speaking") {
       if (listening || micError) return;
       const timer = setTimeout(startMic, REOPEN_MS);
       return () => clearTimeout(timer);
     }
-    if (listening) stopMic();
+    if (phase === "thinking" && listening) stopMic();
   }, [phase, listening, micError, startMic, stopMic]);
 
   /** Read each finished reply out loud, once. */

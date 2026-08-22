@@ -70,9 +70,11 @@ export type VoiceInput = ReturnType<typeof useVoiceInput>;
 export function useVoiceInput({
   lang = "en-US",
   onFinal,
+  onChunk,
 }: {
   lang?: string;
   onFinal: (chunk: string) => void;
+  onChunk?: (chunk: string, isFinal: boolean) => void;
 }) {
   // Server and first client paint both say "unsupported", so the mic button is
   // absent in the HTML either way and hydration has nothing to reconcile.
@@ -82,12 +84,14 @@ export function useVoiceInput({
   const [error, setError] = useState<string | null>(null);
 
   const recognition = useRef<SpeechRecognitionLike | null>(null);
-  // The composer rebuilds `onFinal` every render. Holding the latest in a ref
+  // The composer rebuilds callbacks every render. Holding the latest in a ref
   // keeps the recognition instance alive across a whole dictation session.
   const finalHandler = useRef(onFinal);
+  const chunkHandler = useRef(onChunk);
   useEffect(() => {
     finalHandler.current = onFinal;
-  }, [onFinal]);
+    chunkHandler.current = onChunk;
+  }, [onFinal, onChunk]);
 
   useEffect(() => {
     const Recognition = recognitionCtor();
@@ -109,6 +113,9 @@ export function useVoiceInput({
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0]?.transcript ?? "";
+        if (text) {
+          chunkHandler.current?.(text, result.isFinal);
+        }
         if (result.isFinal) finalHandler.current(text);
         else pending += text;
       }
