@@ -138,26 +138,40 @@ def stream_chat(
                 ls_model_name=model,
                 ls_model_type="chat",
             )
-            # Attempt API call with automatic key rotation retry if a 429 rate limit is hit
+            # Attempt API call with multi-key and multi-model fallback retry on rate limits or model errors
             completion = None
-            for attempt in range(3):
-                try:
-                    curr_client, curr_provider = llm.client()
-                    completion = curr_client.chat.completions.create(
-                        model=curr_provider.model,
-                        messages=messages,
-                        tools=tool_schemas(),
-                        tool_choice="auto",
-                        temperature=0.6,
-                        stream=True,
-                    )
-                    break
-                except Exception as exc:
-                    exc_str = str(exc).lower()
-                    if ("429" in str(exc) or "rate_limit" in exc_str or "too many requests" in exc_str) and attempt < 2:
-                        time.sleep(0.5)
+            models_to_try = [model]
+            if provider.name == "groq":
+                for alt_m in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"]:
+                    if alt_m not in models_to_try:
+                        models_to_try.append(alt_m)
+
+            last_exc = None
+            rot_keys = llm.rotating_keys()
+            attempts_per_model = max(len(rot_keys), 2)
+
+            for try_model in models_to_try:
+                for _attempt in range(attempts_per_model):
+                    try:
+                        curr_client, curr_provider = llm.client()
+                        completion = curr_client.chat.completions.create(
+                            model=try_model,
+                            messages=messages,
+                            tools=tool_schemas(),
+                            tool_choice="auto",
+                            temperature=0.6,
+                            stream=True,
+                        )
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        time.sleep(0.2)
                         continue
-                    raise exc
+                if completion is not None:
+                    break
+
+            if completion is None:
+                raise last_exc or RuntimeError("All API keys and fallback models failed.")
 
             text = ""
             # Streamed tool calls arrive in fragments keyed by `index`: the name

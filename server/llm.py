@@ -42,7 +42,7 @@ class Provider(NamedTuple):
 PROVIDERS: List[Provider] = [
     Provider("openrouter", "sk-or-", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
     Provider("anthropic", "sk-ant-", "https://api.anthropic.com/v1", "claude-sonnet-4-5"),
-    Provider("groq", "gsk_", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
+    Provider("groq", "gsk_", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
     Provider("openai", "sk-", "https://api.openai.com/v1", "gpt-4.1-mini"),
 ]
 
@@ -136,14 +136,18 @@ def resolve() -> Tuple[Optional[str], Provider]:
         return None, UNKNOWN
 
     found = detect(key)
+    env_model = (
+        os.environ.get("LLM_MODEL", "").strip()
+        or os.environ.get("GROQ_MODEL", "").strip()
+        or found.model
+    )
+    # Auto-correct invalid/deprecated gpt-oss-120b model name on Groq
+    if found.name == "groq" and "gpt-oss-120b" in env_model:
+        env_model = "llama-3.3-70b-versatile"
+
     return key, found._replace(
         base_url=os.environ.get("LLM_BASE_URL", "").strip() or found.base_url,
-        # GROQ_MODEL is still honoured so existing .env.local files keep working.
-        model=(
-            os.environ.get("LLM_MODEL", "").strip()
-            or os.environ.get("GROQ_MODEL", "").strip()
-            or found.model
-        ),
+        model=env_model,
     )
 
 
