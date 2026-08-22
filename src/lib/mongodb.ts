@@ -11,10 +11,12 @@ export const DB_UNREACHABLE =
 let client: MongoClient | null = null;
 
 export async function getDb(): Promise<Db> {
-  if (!MONGODB_URI) throw new Error("MONGODB_URI is not set");
+  const uri = process.env.MONGODB_URI;
+  const dbName = process.env.MONGODB_DB;
+  if (!uri) throw new Error("MONGODB_URI is not set in environment variables");
 
   if (!client) {
-    const pending = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+    const pending = new MongoClient(uri, { serverSelectionTimeoutMS: 8000 });
     try {
       await pending.connect();
     } catch (err) {
@@ -25,5 +27,5 @@ export async function getDb(): Promise<Db> {
     }
     client = pending;
   }
-  return client.db(MONGODB_DB);
+  return client.db(dbName);
 }
