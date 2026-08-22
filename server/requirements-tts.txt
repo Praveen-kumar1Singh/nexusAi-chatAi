@@ -1,0 +1,13 @@
+# Optional: spoken replies. The agent runs without this file installed --
+# server/tts.py reports the absence and the UI hides the speaker button.
+#
+#   cd server && ./.venv/bin/pip install -r requirements-tts.txt
+#
+# CPU-only ONNX, no GPU needed. See https://github.com/KittenML/KittenTTS
+https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl
+# Pulled in by the wheel, pinned here because tts.py encodes the WAV with it.
+numpy>=1.24
+
+# Hindi speech: facebook/mms-tts-hin, a 36M VITS checkpoint. torch is already
+# pulled in by the KittenTTS wheel above, so this only adds the loader.
+transformers>=4.44

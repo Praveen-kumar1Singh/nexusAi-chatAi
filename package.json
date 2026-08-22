@@ -6,12 +6,23 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "setup:api": "cd server && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt",
+    "setup:tts": "cd server && ./.venv/bin/python -c \"import sys; sys.version_info >= (3, 10) or sys.exit('\\nKittenTTS needs Python >= 3.10 (spaCy has no 3.9 build).\\nRebuild: rm -rf server/.venv && python3.10 -m venv server/.venv && npm run setup:api\\n')\" && ./.venv/bin/pip install -r requirements-tts.txt",
+    "dev:api": "cd server && ./.venv/bin/uvicorn main:app --reload --port 8000"
   },
   "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.33.0",
+    "mongodb": "^7.5.0",
     "next": "16.3.1",
+    "radix-ui": "^1.6.7",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -1,0 +1,305 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  AudioLines,
+  ChevronsLeft,
+  ChevronsRight,
+  Hexagon,
+  MessageSquare,
+  Plus,
+  Trash2,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { ProfileAvatarMenu } from "@/components/auth/profile-avatar-menu";
+import { AuthModal } from "@/components/auth/auth-modal";
+import { showToast } from "@/components/ui/toast";
+import { AUTH_CHANGED_EVENT, useSession } from "@/lib/auth";
+import { CONVERSATIONS_CHANGED, SELECT_CONVERSATION, type Conversation } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+/** Bucket a conversation by how long ago it was last touched. */
+function groupOf(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days < 1) return "Today";
+  if (days < 2) return "Yesterday";
+  if (days < 7) return "Previous 7 Days";
+  return "Older";
+}
+
+const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 Days", "Older"];
+
+/** The two ways into the agent. Both share this sidebar and the same history. */
+const SECTIONS = [
+  { href: "/", label: "Chat", icon: MessageSquare },
+  { href: "/voice", label: "AI Voice Chat", icon: AudioLines },
+] as const;
+
+function cleanTitle(rawTitle: string): string {
+  if (!rawTitle) return "New Conversation";
+  let cleaned = rawTitle
+    .replace(/===ATTACHMENT_START:[\s\S]*?===/g, "")
+    .replace(/===ATTACHMENT_END===/g, "")
+    .replace(/【.*?】/g, "")
+    .replace(/^#+\s*/, "")
+    .replace(/^\*\*|\*\*$/g, "")
+    .trim();
+
+  cleaned = cleaned.replace(/\s+/g, " ");
+
+  if (!cleaned) return "Attachment File";
+
+  if (cleaned.length > 38) {
+    cleaned = cleaned.slice(0, 38).trim() + "...";
+  }
+
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+export function AppSidebar({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const pathname = usePathname();
+  const router = useRouter();
+  const onChatPage = pathname === "/";
+  // Guests get a single, unsaved chat window: no thread list, and no way to
+  // start a second one. Signing in unlocks both.
+  const { user, loading: sessionLoading } = useSession();
+  const signedIn = Boolean(user);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authTab, setAuthTab] = useState<"login" | "register">("login");
+
+  function selectThread(id: string | null) {
+    setActiveId(id);
+    // The chat page listens in-place; anywhere else, route to it and let the
+    // `?c=` parameter open the thread once it mounts.
+    if (onChatPage) {
+      window.dispatchEvent(new CustomEvent(SELECT_CONVERSATION, { detail: { id } }));
+    } else {
+      router.push(id ? `/?c=${encodeURIComponent(id)}` : "/");
+    }
+  }
+
+  const load = useCallback(
+    () =>
+      fetch("/api/conversations", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { conversations?: Conversation[] } | null) => {
+          if (data) setConversations(data.conversations ?? []);
+        })
+        // Agent offline -- leave the list empty rather than breaking the shell.
+        .catch(() => {}),
+    [],
+  );
+
+  useEffect(() => {
+    // Nothing to fetch for a guest, and nothing stored to fetch it from.
+    if (!signedIn) return;
+    load();
+    // useChat fires this after each turn so a new thread shows up immediately.
+    window.addEventListener(CONVERSATIONS_CHANGED, load);
+    return () => window.removeEventListener(CONVERSATIONS_CHANGED, load);
+  }, [load, signedIn]);
+
+  // A different account means a different set of threads; drop the previous
+  // one's titles rather than leaving them in the panel.
+  useEffect(() => {
+    function onAuthChange() {
+      setActiveId(null);
+      setConversations([]);
+    }
+    window.addEventListener(AUTH_CHANGED_EVENT, onAuthChange);
+    return () => window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChange);
+  }, []);
+
+  async function remove(id: string) {
+    try {
+      const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        if (id === activeId) selectThread(null);
+        load();
+        showToast("Conversation deleted successfully", "success");
+      } else {
+        showToast("Failed to delete conversation", "error");
+      }
+    } catch {
+      showToast("Error deleting conversation", "error");
+    }
+  }
+
+  return (
+    <aside
+      className="flex h-full w-full flex-col bg-sidebar text-sidebar-foreground overflow-hidden"
+    >
+      <div
+        className={cn("flex items-center gap-2 px-4 py-4", collapsed && "cursor-pointer hover:bg-sidebar-accent/50 transition-colors")}
+        onClick={collapsed ? onToggle : undefined}
+        title={collapsed ? "Expand sidebar" : undefined}
+      >
+        <div className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-primary/15 text-primary ring-1 ring-primary/30 cursor-pointer">
+          <Hexagon className="size-4" />
+        </div>
+        {!collapsed && (
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-sm font-semibold">Nexus AI</p>
+            <p className="truncate text-[11px] text-muted-foreground">Environment</p>
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground cursor-pointer"
+          onClick={(e) => {
+            if (collapsed) e.stopPropagation();
+            onToggle();
+          }}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
+        </Button>
+      </div>
+
+      <nav className="space-y-0.5 px-3 pb-3">
+        {SECTIONS.map((section) => {
+          const current = pathname === section.href;
+          return (
+            <Link
+              key={section.href}
+              href={section.href}
+              title={collapsed ? section.label : undefined}
+              aria-current={current ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
+                collapsed && "justify-center px-0",
+                current
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+              )}
+            >
+              <section.icon className={cn("size-4 shrink-0", current && "text-primary")} />
+              {!collapsed && section.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {!sessionLoading && signedIn && (
+        <div className="px-3 pb-3">
+          <Button
+            variant="secondary"
+            onClick={() => selectThread(null)}
+            className={cn(
+              "w-full justify-start gap-2 border border-border bg-elevated/70 text-sm hover:bg-elevated cursor-pointer",
+              collapsed && "justify-center px-0",
+            )}
+          >
+            <Plus className="size-4 text-primary" />
+            {!collapsed && "New Conversation"}
+          </Button>
+        </div>
+      )}
+
+      <div className="px-3 pt-1">
+        <Separator className="bg-sidebar-border" />
+      </div>
+
+      {!collapsed && !sessionLoading && !signedIn && (
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+          <div className="rounded-xl border border-border bg-surface/60 p-2.5 space-y-1">
+            <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-foreground">
+              <MessageSquare className="size-3 text-primary shrink-0" />
+              Guest Chat (Unsaved)
+            </p>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Temporary window.{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab("login");
+                  setAuthModalOpen(true);
+                }}
+                className="font-medium text-primary hover:text-primary/80 transition-colors no-underline cursor-pointer"
+              >
+                Log in / Register
+              </button>{" "}
+              to save history &amp; unlock 50 free credits.
+            </p>
+          </div>
+
+          <AuthModal
+            open={authModalOpen}
+            onClose={() => setAuthModalOpen(false)}
+            initialTab={authTab}
+          />
+        </div>
+      )}
+
+      {!collapsed && !sessionLoading && signedIn && (
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+          {conversations.length === 0 ? (
+            <p className="px-2.5 py-2 text-[12px] text-muted-foreground/70">
+              No conversations yet. Ask something to start one.
+            </p>
+          ) : (
+            GROUP_ORDER.map((group) => {
+              const rows = conversations.filter((c) => groupOf(c.updated_at) === group);
+              if (!rows.length) return null;
+              return (
+                <div key={group} className="mb-4">
+                  <p className="px-2.5 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                    {group}
+                  </p>
+                  <div className="space-y-0.5">
+                    {rows.map((c) => (
+                      <div
+                        key={c.id}
+                        className={cn(
+                          "group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                          c.id === activeId && "bg-sidebar-accent text-sidebar-accent-foreground",
+                        )}
+                      >
+                        <MessageSquare className="size-3.5 shrink-0 opacity-70" />
+                        <button
+                          onClick={() => selectThread(c.id)}
+                          className="min-w-0 flex-1 truncate text-left cursor-pointer"
+                          title={cleanTitle(c.title)}
+                        >
+                          {cleanTitle(c.title)}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            remove(c.id);
+                          }}
+                          className="opacity-0 transition-opacity group-hover:opacity-100 rounded-md p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
+                          title="Delete conversation"
+                          aria-label={`Delete ${cleanTitle(c.title)}`}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      <div className="mt-auto border-t border-sidebar-border">
+        <ProfileAvatarMenu collapsed={collapsed} onNavigate={onToggle} />
+      </div>
+    </aside>
+  );
+}
