@@ -7,7 +7,7 @@ services:
   - type: web
     name: nexus-agent
     runtime: python
-    plan: starter          # `free` sleeps after 15 min; see DEPLOY.md before choosing it.
+    plan: free
     region: singapore      # closest to Mongo Atlas / your users -- change if yours differ.
     rootDir: server
     buildCommand: pip install -r requirements.txt
