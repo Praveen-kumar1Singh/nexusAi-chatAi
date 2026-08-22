@@ -140,9 +140,17 @@ def stream_chat(
             )
             # Attempt API call with multi-key and multi-model fallback retry on rate limits or model errors
             completion = None
+            groq_models = [
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
+                "llama3-70b-8192",
+                "llama3-8b-8192",
+                "mixtral-8x7b-32768",
+                "qwen-2.5-coder-32b",
+            ]
             models_to_try = [model]
             if provider.name == "groq":
-                for alt_m in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"]:
+                for alt_m in groq_models:
                     if alt_m not in models_to_try:
                         models_to_try.append(alt_m)
 
@@ -151,6 +159,7 @@ def stream_chat(
             attempts_per_model = max(len(rot_keys), 2)
 
             for try_model in models_to_try:
+                model_unavailable = False
                 for _attempt in range(attempts_per_model):
                     try:
                         curr_client, curr_provider = llm.client()
@@ -164,9 +173,24 @@ def stream_chat(
                         )
                         break
                     except Exception as exc:
+                        exc_str = str(exc).lower()
+                        # If a model is decommissioned or invalid, skip to the next active model
+                        if (
+                            "decommissioned" in exc_str
+                            or "not_found" in exc_str
+                            or "model_not_found" in exc_str
+                            or "does not exist" in exc_str
+                        ):
+                            model_unavailable = True
+                            print(
+                                f"[agent] Model '{try_model}' is decommissioned or invalid, skipping to next model...",
+                                flush=True,
+                            )
+                            break
                         last_exc = exc
                         time.sleep(0.2)
                         continue
+
                 if completion is not None:
                     break
 
