@@ -149,11 +149,7 @@ function Orb({
 
         {/* Center Icon */}
         <span className={cn("relative transition-all duration-500", look.tone)}>
-          {phase === "thinking" ? (
-            <div className="flex flex-col items-center gap-2">
-              <Loader2 className="size-14 animate-spin text-amber-500" />
-            </div>
-          ) : phase === "speaking" ? (
+          {phase === "speaking" ? (
             <Volume2 className="size-14 text-emerald-500 animate-pulse" />
           ) : phase === "listening" ? (
             <Mic
@@ -162,6 +158,8 @@ function Orb({
                 hasSpeechInput && "scale-110 text-primary",
               )}
             />
+          ) : phase === "thinking" ? (
+            <Hexagon className="size-14 text-amber-500 animate-pulse" />
           ) : (
             <Hexagon className="size-14 text-muted-foreground/60" />
           )}
