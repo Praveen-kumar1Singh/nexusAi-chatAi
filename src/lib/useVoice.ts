@@ -309,6 +309,24 @@ function playClip(
   });
 }
 
+function playBrowserSynthesis(text: string, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      resolve();
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    signal.addEventListener("abort", () => {
+      window.speechSynthesis.cancel();
+      resolve();
+    }, { once: true });
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
 type SpeechStatus = {
   installed: boolean;
   voice: string;
@@ -336,7 +354,8 @@ function unreachable(status?: number): SpeechStatus {
 export type Speech = ReturnType<typeof useSpeech>;
 
 /**
- * Plays replies through the Python service's KittenTTS endpoint.
+ * Plays replies through the Python service's KittenTTS endpoint, or falls back
+ * to browser Web Speech API (window.speechSynthesis) when KittenTTS is unavailable.
  *
  * `enabled` is the composer's speaker toggle; the caller decides *when* to
  * speak, this hook only owns the request, the audio element and its cleanup.
@@ -371,18 +390,16 @@ export function useSpeech() {
   const stop = useCallback(() => {
     run.current?.abort();
     run.current = null;
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
     audio.current?.pause();
     audio.current = null;
     setSpeaking(false);
   }, []);
 
   /**
-   * Speak a reply, pipelined.
-   *
-   * Synthesis runs about 3x faster than playback, so the next chunk is
-   * requested while the current one is still playing and the queue stays
-   * ahead. Only the first chunk is ever waited on in silence, which is why
-   * speechChunks keeps it short -- it alone sets the time to first audio.
+   * Speak a reply, pipelined via KittenTTS if available, or browser speechSynthesis as fallback.
    */
   const speak = useCallback(
     async (markdown: string) => {
@@ -397,42 +414,57 @@ export function useSpeech() {
       setError(null);
       setSpeaking(true);
 
-      const played: string[] = [];
-      try {
-        const chunks = speechChunks(text);
-        let upcoming = fetchClip(chunks[0], signal);
+      // If KittenTTS is available on server, use backend WAV generation
+      if (status?.installed) {
+        const played: string[] = [];
+        try {
+          const chunks = speechChunks(text);
+          let upcoming = fetchClip(chunks[0], signal);
 
-        for (let i = 0; i < chunks.length; i++) {
-          const url = await upcoming;
-          if (signal.aborted) return;
-          played.push(url);
+          for (let i = 0; i < chunks.length; i++) {
+            const url = await upcoming;
+            if (signal.aborted) return;
+            played.push(url);
 
-          // Kick off the next synthesis before playing this one, so the
-          // request overlaps the audio rather than following it.
-          upcoming =
-            i + 1 < chunks.length
-              ? fetchClip(chunks[i + 1], signal)
-              : Promise.reject(new Error("done"));
-          upcoming.catch(() => {}); // the sentinel is expected; do not warn
+            // Kick off the next synthesis before playing this one
+            upcoming =
+              i + 1 < chunks.length
+                ? fetchClip(chunks[i + 1], signal)
+                : Promise.reject(new Error("done"));
+            upcoming.catch(() => {});
 
-          await playClip(url, signal, (el) => {
-            audio.current = el;
-          });
-          if (signal.aborted) return;
+            await playClip(url, signal, (el) => {
+              audio.current = el;
+            });
+            if (signal.aborted) return;
+          }
+        } catch (err) {
+          if (signal.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
+          setError(err instanceof Error ? err.message : "Speech failed.");
+        } finally {
+          for (const url of played) URL.revokeObjectURL(url);
+          if (run.current === controller) {
+            run.current = null;
+            setSpeaking(false);
+          }
         }
-      } catch (err) {
-        // Aborting is how stop() works, not a failure worth reporting.
-        if (signal.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
-        setError(err instanceof Error ? err.message : "Speech failed.");
-      } finally {
-        for (const url of played) URL.revokeObjectURL(url);
-        if (run.current === controller) {
-          run.current = null;
-          setSpeaking(false);
+      } else if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        // Fallback: Browser Web Speech API TTS
+        try {
+          await playBrowserSynthesis(text, signal);
+        } catch (err) {
+          if (!signal.aborted) {
+            setError(err instanceof Error ? err.message : "Speech synthesis failed.");
+          }
+        } finally {
+          if (run.current === controller) {
+            run.current = null;
+            setSpeaking(false);
+          }
         }
       }
     },
-    [stop],
+    [status?.installed, stop],
   );
 
   // Turning the speaker off silences whatever is mid-sentence.
@@ -445,12 +477,17 @@ export function useSpeech() {
 
   useEffect(() => stop, [stop]);
 
+  const hasBrowserTts = typeof window !== "undefined" && "speechSynthesis" in window;
+  const isAvailable = status?.installed === true || (status !== null && hasBrowserTts);
+
   return {
-    /** Null until the agent answers; false when the wheel is not installed. */
-    available: status?.installed ?? null,
-    /** Install instructions from the server, when it is not. */
-    hint: status?.hint ?? null,
-    voice: status?.voice ?? null,
+    /** Null until status is fetched; true when KittenTTS server or browser speechSynthesis is available. */
+    available: isAvailable ? true : status?.installed ?? null,
+    /** Whether browser fallback TTS is being used instead of server KittenTTS */
+    isFallback: !status?.installed && hasBrowserTts,
+    /** Install instructions from the server, when KittenTTS is not installed and browser TTS is missing. */
+    hint: !hasBrowserTts ? status?.hint ?? null : null,
+    voice: status?.installed ? status?.voice ?? null : "Browser Voice",
     enabled,
     speaking,
     error,

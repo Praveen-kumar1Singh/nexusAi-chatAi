@@ -271,8 +271,9 @@ export function useVoiceCall(chat: {
     supported: voice.supported,
     micError,
     speechError: speech.error,
-    /** Null until the agent answers; false when KittenTTS is not installed. */
+    /** Null until status is checked; false when neither KittenTTS nor browser TTS is available. */
     speechAvailable: speech.available,
+    speechFallback: speech.isFallback,
     speechHint: speech.hint,
     voiceName: speech.voice,
     active,
