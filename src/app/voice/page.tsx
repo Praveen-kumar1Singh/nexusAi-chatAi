@@ -6,13 +6,10 @@ import {
   AlertCircle,
   Crown,
   FileText,
-  Hexagon,
   Loader2,
   Lock,
   Mic,
-  MicOff,
   PhoneOff,
-  Volume2,
   X,
 } from "lucide-react";
 import { AppShell } from "@/components/chat/app-shell";
@@ -52,44 +49,8 @@ const PHASES: Record<CallPhase, { tone: string; ring: string; label: string; hin
   },
 };
 
-function AudioVisualizer({
-  active,
-  mode = "listening",
-}: {
-  active: boolean;
-  mode?: CallPhase;
-}) {
-  const barColors: Record<CallPhase, string> = {
-    idle: "bg-muted-foreground/30",
-    listening: "bg-gradient-to-t from-primary/60 to-primary",
-    thinking: "bg-gradient-to-t from-amber-500/60 to-amber-400 animate-pulse",
-    speaking: "bg-gradient-to-t from-emerald-500/60 to-emerald-400",
-  };
-
-  const colorClass = barColors[mode];
-
-  return (
-    <div className="flex items-center gap-1.5 h-10 justify-center my-3">
-      {[0.4, 0.7, 1.0, 0.6, 0.9, 0.5, 0.8, 0.6, 0.3].map((heightScale, i) => (
-        <span
-          key={i}
-          className={cn(
-            "w-1.5 rounded-full transition-all duration-200 shadow-xs",
-            colorClass,
-            active ? "animate-pulse" : "h-2 opacity-30",
-          )}
-          style={{
-            height: active ? `${Math.max(14, heightScale * 38)}px` : "6px",
-            animationDuration: `${0.35 + (i % 4) * 0.15}s`,
-            animationDelay: `${i * 0.08}s`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function Orb({
+/** Real-time Audio Waves visualizer replacing the old circular ring button */
+function RealTimeAudioWaves({
   phase,
   hasSpeechInput,
   onInterrupt,
@@ -98,85 +59,96 @@ function Orb({
   hasSpeechInput: boolean;
   onInterrupt: () => void;
 }) {
-  const look = PHASES[phase];
   const live = phase !== "idle";
+  const active =
+    phase === "speaking" ||
+    phase === "thinking" ||
+    (phase === "listening" && hasSpeechInput);
+
+  const phaseGlow: Record<CallPhase, string> = {
+    idle: "bg-muted-foreground/10",
+    listening: "bg-primary/25",
+    thinking: "bg-amber-500/25",
+    speaking: "bg-emerald-500/25",
+  };
+
+  const barGradients: Record<CallPhase, string> = {
+    idle: "from-muted-foreground/20 via-muted-foreground/40 to-muted-foreground/20",
+    listening: "from-primary/40 via-primary to-cyan-400",
+    thinking: "from-amber-600/40 via-amber-500 to-yellow-300",
+    speaking: "from-emerald-600/40 via-emerald-500 to-teal-300",
+  };
+
+  // 25 symmetrical height scale factors forming a natural audio waveform curve
+  const barScales = [
+    0.15, 0.25, 0.4, 0.6, 0.85, 0.7, 0.95, 0.65, 0.9, 1.0, 0.8, 0.95, 0.75, 0.9,
+    0.85, 1.0, 0.9, 0.65, 0.95, 0.7, 0.85, 0.6, 0.4, 0.25, 0.15,
+  ];
 
   return (
-    <div className="relative flex flex-col items-center">
+    <div className="relative flex flex-col items-center my-4 w-full">
       <button
+        type="button"
         onClick={phase === "speaking" ? onInterrupt : undefined}
         disabled={phase !== "speaking"}
-        className="group relative grid size-44 place-items-center rounded-full disabled:cursor-default sm:size-52 transition-transform duration-300 active:scale-95"
-        aria-label={phase === "speaking" ? "Interrupt and speak" : look.label}
+        className={cn(
+          "group relative flex h-44 sm:h-52 w-full max-w-md items-center justify-center rounded-3xl p-4 transition-all duration-500 focus:outline-hidden",
+          phase === "speaking" ? "cursor-pointer active:scale-98" : "cursor-default",
+        )}
+        aria-label={phase === "speaking" ? "Tap to interrupt AI" : `Audio Waveform: ${phase}`}
       >
         {/* Glow backdrop */}
-        {live && (
-          <div
-            className={cn(
-              "absolute -inset-4 rounded-full blur-2xl opacity-40 transition-all duration-700",
-              phase === "listening" && "bg-primary/30",
-              phase === "thinking" && "bg-amber-500/30",
-              phase === "speaking" && "bg-emerald-500/30",
-            )}
-          />
-        )}
-
-        {/* Expanding rings */}
-        {live && (
-          <>
-            <span
-              className={cn(
-                "absolute inset-0 animate-ping rounded-full border opacity-50",
-                look.ring,
-              )}
-              style={{ animationDuration: "2.5s" }}
-            />
-            <span
-              className={cn(
-                "absolute inset-3 animate-pulse rounded-full border opacity-70",
-                look.ring,
-              )}
-            />
-          </>
-        )}
-
-        <span
+        <div
           className={cn(
-            "absolute inset-6 rounded-full border-2 transition-all duration-500 backdrop-blur-xs shadow-xl",
-            look.ring,
+            "absolute inset-0 rounded-3xl blur-3xl opacity-50 transition-all duration-700 pointer-events-none",
+            phaseGlow[phase],
           )}
         />
 
-        {/* Center Icon */}
-        <span className={cn("relative transition-all duration-500", look.tone)}>
-          {phase === "speaking" ? (
-            <Volume2 className="size-14 text-emerald-500 animate-pulse" />
-          ) : phase === "listening" ? (
-            <Mic
-              className={cn(
-                "size-14 transition-transform duration-300",
-                hasSpeechInput && "scale-110 text-primary",
-              )}
-            />
-          ) : phase === "thinking" ? (
-            <Hexagon className="size-14 text-amber-500 animate-pulse" />
-          ) : (
-            <Hexagon className="size-14 text-muted-foreground/60" />
-          )}
-        </span>
+        {/* Dynamic Real-time Waveform Bars */}
+        <div className="relative z-10 flex items-center justify-center gap-1 sm:gap-1.5 h-36 w-full px-4">
+          {barScales.map((scale, i) => {
+            const baseMinHeight = live ? 12 : 8;
+            const maxHeight = 120;
+
+            let barHeight = baseMinHeight;
+            if (phase === "speaking") {
+              barHeight = Math.max(22, scale * maxHeight);
+            } else if (phase === "listening" && hasSpeechInput) {
+              barHeight = Math.max(18, scale * maxHeight * 0.85);
+            } else if (phase === "listening") {
+              barHeight = Math.max(12, scale * maxHeight * 0.4);
+            } else if (phase === "thinking") {
+              barHeight = Math.max(16, scale * maxHeight * 0.55);
+            }
+
+            return (
+              <span
+                key={i}
+                className={cn(
+                  "w-1.5 sm:w-2 rounded-full bg-gradient-to-t transition-all duration-300 shadow-xs",
+                  barGradients[phase],
+                  active ? "animate-pulse" : "opacity-40",
+                )}
+                style={{
+                  height: `${barHeight}px`,
+                  animationDuration: active
+                    ? `${0.3 + (i % 5) * 0.12}s`
+                    : "1.5s",
+                  animationDelay: `${(i % 8) * 0.06}s`,
+                }}
+              />
+            );
+          })}
+        </div>
+
+        {/* Tap to interrupt overlay prompt when AI is speaking */}
+        {phase === "speaking" && (
+          <span className="absolute bottom-2 z-20 rounded-full border border-emerald-500/40 bg-emerald-950/80 backdrop-blur-md px-3 py-1 text-[11px] font-medium text-emerald-300 shadow-sm animate-pulse">
+            Tap waves to interrupt
+          </span>
+        )}
       </button>
-
-      {/* Real-time Audio Waves */}
-      {live && (
-        <AudioVisualizer
-          active={
-            phase === "speaking" ||
-            phase === "thinking" ||
-            (phase === "listening" && hasSpeechInput)
-          }
-          mode={phase}
-        />
-      )}
     </div>
   );
 }
@@ -285,7 +257,7 @@ function VoiceCall() {
           </p>
         </div>
 
-        <Orb
+        <RealTimeAudioWaves
           phase={call.phase}
           hasSpeechInput={Boolean(saying)}
           onInterrupt={call.interrupt}
