@@ -140,32 +140,41 @@ export function AppSidebar({
     <aside
       className="flex h-full w-full flex-col bg-sidebar text-sidebar-foreground overflow-hidden"
     >
-      <div
-        className={cn("flex items-center gap-2 px-4 py-4", collapsed && "cursor-pointer hover:bg-sidebar-accent/50 transition-colors")}
-        onClick={collapsed ? onToggle : undefined}
-        title={collapsed ? "Expand sidebar" : undefined}
-      >
-        <div className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-primary/15 text-primary ring-1 ring-primary/30 cursor-pointer">
-          <Hexagon className="size-4" />
-        </div>
-        {!collapsed && (
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-display text-sm font-semibold">Nexus AI</p>
-            <p className="truncate text-[11px] text-muted-foreground">Environment</p>
-          </div>
+      <div className="flex items-center justify-between px-3.5 py-4">
+        {collapsed ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggle}
+            className="mx-auto size-8 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/80 cursor-pointer rounded-lg transition-colors"
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+          >
+            <ChevronsRight className="size-4 text-primary" />
+          </Button>
+        ) : (
+          <>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-primary/15 text-primary ring-1 ring-primary/30">
+                <Hexagon className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-display text-sm font-semibold">Nexus AI</p>
+                <p className="truncate text-[11px] text-muted-foreground">Environment</p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
+              onClick={onToggle}
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <ChevronsLeft className="size-4" />
+            </Button>
+          </>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 text-muted-foreground cursor-pointer"
-          onClick={(e) => {
-            if (collapsed) e.stopPropagation();
-            onToggle();
-          }}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
-        </Button>
       </div>
 
       <nav className="space-y-0.5 px-3 pb-3">
