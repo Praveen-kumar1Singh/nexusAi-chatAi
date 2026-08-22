@@ -35,7 +35,7 @@ export function AppShell({
       <Sheet open={mobileNav} onOpenChange={setMobileNav}>
         <SheetContent side="left" showCloseButton={false} className="w-[70vw] max-w-[280px] border-sidebar-border p-0">
           <Suspense fallback={null}>
-            <AppSidebar collapsed={false} onToggle={() => setMobileNav(false)} />
+            <AppSidebar collapsed={false} onToggle={() => setMobileNav(false)} onItemClick={() => setMobileNav(false)} />
           </Suspense>
         </SheetContent>
       </Sheet>

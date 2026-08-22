@@ -62,9 +62,11 @@ function cleanTitle(rawTitle: string): string {
 export function AppSidebar({
   collapsed,
   onToggle,
+  onItemClick,
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  onItemClick?: () => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -80,6 +82,7 @@ export function AppSidebar({
 
   function selectThread(id: string | null) {
     setActiveId(id);
+    onItemClick?.();
     // The chat page listens in-place; anywhere else, route to it and let the
     // `?c=` parameter open the thread once it mounts.
     if (onChatPage) {
@@ -184,6 +187,7 @@ export function AppSidebar({
             <Link
               key={section.href}
               href={section.href}
+              onClick={() => onItemClick?.()}
               title={collapsed ? section.label : undefined}
               aria-current={current ? "page" : undefined}
               className={cn(
@@ -307,7 +311,7 @@ export function AppSidebar({
       )}
 
       <div className="mt-auto border-t border-sidebar-border">
-        <ProfileAvatarMenu collapsed={collapsed} onNavigate={onToggle} />
+        <ProfileAvatarMenu collapsed={collapsed} onNavigate={onItemClick ?? onToggle} />
       </div>
     </aside>
   );
