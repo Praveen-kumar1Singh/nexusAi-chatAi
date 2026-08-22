@@ -76,7 +76,7 @@ export default function PlansPage() {
 
       if (res.ok) {
         await refreshCurrentUser();
-        showToast("Free Plan activated! 15 credits granted.", "success");
+        showToast("Free Plan activated! 50 credits granted.", "success");
         router.push("/");
       } else {
         showToast(data?.error || "Failed to activate Free Plan.", "error");

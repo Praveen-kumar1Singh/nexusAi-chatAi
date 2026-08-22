@@ -48,7 +48,7 @@ export function PlanActivationModal({
 
       if (res.ok) {
         await refreshCurrentUser();
-        showToast("Free Plan activated! 15 credits granted.", "success");
+        showToast("Free Plan activated! 50 credits granted.", "success");
         onClose();
       } else {
         showToast(data?.error || "Failed to activate Free Plan.", "error");
