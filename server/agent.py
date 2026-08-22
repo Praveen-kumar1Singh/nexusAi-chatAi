@@ -138,14 +138,26 @@ def stream_chat(
                 ls_model_name=model,
                 ls_model_type="chat",
             )
-            completion = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tool_schemas(),
-                tool_choice="auto",
-                temperature=0.6,
-                stream=True,
-            )
+            # Attempt API call with automatic key rotation retry if a 429 rate limit is hit
+            completion = None
+            for attempt in range(3):
+                try:
+                    curr_client, curr_provider = llm.client()
+                    completion = curr_client.chat.completions.create(
+                        model=curr_provider.model,
+                        messages=messages,
+                        tools=tool_schemas(),
+                        tool_choice="auto",
+                        temperature=0.6,
+                        stream=True,
+                    )
+                    break
+                except Exception as exc:
+                    exc_str = str(exc).lower()
+                    if ("429" in str(exc) or "rate_limit" in exc_str or "too many requests" in exc_str) and attempt < 2:
+                        time.sleep(0.5)
+                        continue
+                    raise exc
 
             text = ""
             # Streamed tool calls arrive in fragments keyed by `index`: the name
