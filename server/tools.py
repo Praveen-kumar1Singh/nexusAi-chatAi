@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List
 import duckduckgo
 import images
 import store
+import video
 
 # --------------------------------------------------------------------------
 # implementations
@@ -130,6 +131,63 @@ def generate_image(prompt: str, size: str = "square", style: str = "none") -> Di
     }
 
 
+# Where the browser fetches a stored clip, same arrangement as IMAGE_PATH above.
+VIDEO_PATH = "/api/videos/{}"
+
+
+def generate_video(
+    prompt: str,
+    duration: int = 5,
+    aspect: str = "landscape",
+    style: str = "none",
+) -> Dict[str, Any]:
+    """Make a short video from a written description.
+
+    Stored on the way through like a generated image, and for a stronger version
+    of the same reason: a clip is megabytes, so only the id travels back through
+    the stream and into the saved conversation.
+    """
+    prompt = str(prompt or "").strip()
+    if not prompt:
+        raise ValueError("Describe what the video should show")
+
+    result = video.generate(prompt, duration=duration, aspect=aspect, style=style)
+    video_id = store.save_video(
+        result["data"],
+        result["mime"],
+        {
+            "prompt": result["prompt"],
+            "style": result["style"],
+            "duration": result["duration"],
+            "aspect": result["aspect"],
+            "aspect_ratio": result["aspect_ratio"],
+            "resolution": result["resolution"],
+            "audio": result["audio"],
+            "provider": result["provider"],
+            "model": result["model"],
+            "bytes": result["bytes"],
+            "cost_usd": result["cost_usd"],
+        },
+    )
+
+    return {
+        "status": "generated",
+        "url": VIDEO_PATH.format(video_id),
+        "prompt": result["prompt"],
+        "duration": result["duration"],
+        "aspect": result["aspect"],
+        "aspect_ratio": result["aspect_ratio"],
+        "resolution": result["resolution"],
+        "provider": result["provider"],
+        "model": result["model"],
+        "instruction": (
+            "The video is already on screen -- the UI rendered it from this result. "
+            "Reply with one short line about what you made. Do not paste the URL, do "
+            "not describe the clip shot by shot, and do not call any more tools."
+        ),
+    }
+
+
 # --------------------------------------------------------------------------
 # schemas sent to Groq
 # --------------------------------------------------------------------------
@@ -211,6 +269,60 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+    "generate_video": {
+        "fn": generate_video,
+        "reads": "a video model -- see server/video.py",
+        "writes": True,
+        # The only tool that can be switched off by configuration. Video has no
+        # free tier, so without a key every call would 401 -- and a tool the
+        # model can see is a tool it will try, then apologise for.
+        "available": lambda: video.status()["available"],
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "generate_video",
+                "description": (
+                    "Create a short video clip from a written description. Use this "
+                    "when the user asks you to animate something, or asks for a video, "
+                    "clip, animation, ad, trailer or b-roll. Write the prompt yourself: "
+                    "expand what they said into one vivid sentence naming the subject, "
+                    "the motion, the setting and the lighting -- motion is what makes a "
+                    "video prompt different from an image one, so always say what moves. "
+                    "This costs real money per second and takes 1-3 minutes, so call it "
+                    "once per message and only when a still image would not do."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "One vivid sentence: subject, motion, setting, lighting.",
+                        },
+                        "duration": {
+                            "type": "integer",
+                            "enum": [5, 10, 15],
+                            "description": (
+                                "Length in seconds. Use 5 unless the user asked for longer. "
+                                "Longer costs proportionally more, and a request the "
+                                "configured model cannot reach is shortened to its nearest."
+                            ),
+                        },
+                        "aspect": {
+                            "type": "string",
+                            "enum": ["landscape", "portrait"],
+                            "description": "Landscape unless the user wants it for a phone or a reel.",
+                        },
+                        "style": {
+                            "type": "string",
+                            "enum": ["none", "cinematic", "realistic", "anime", "3d", "timelapse"],
+                            "description": "Visual treatment. Use 'none' unless the user named a look.",
+                        },
+                    },
+                    "required": ["prompt"],
+                },
+            },
+        },
+    },
     "web_search": {
         "fn": web_search,
         "reads": "the public web via DuckDuckGo",
@@ -244,9 +356,24 @@ TOOLS: Dict[str, Dict[str, Any]] = {
 }
 
 
+def is_available(entry: Dict[str, Any]) -> bool:
+    """Whether a tool can run right now.
+
+    Most tools are always on. One is not: video needs a funded key, and offering
+    it without one costs prompt tokens to advertise a certain failure.
+    """
+    check = entry.get("available")
+    if check is None:
+        return True
+    try:
+        return bool(check())
+    except Exception:
+        return False
+
+
 def tool_schemas() -> List[Dict[str, Any]]:
-    """The `tools` payload for the Groq request."""
-    return [entry["schema"] for entry in TOOLS.values()]
+    """The `tools` payload for the Groq request -- only what can actually run."""
+    return [entry["schema"] for entry in TOOLS.values() if is_available(entry)]
 
 
 def run_tool(name: str, raw_args: str) -> str:
@@ -297,6 +424,8 @@ def registry() -> List[Dict[str, Any]]:
                 "reads": entry.get("reads", "unspecified"),
                 "writes": bool(entry.get("writes", False)),
                 "routable": entry.get("routable", True),
+                # False means configured off, not broken -- the Tools page says so.
+                "available": is_available(entry),
             }
         )
     return rows

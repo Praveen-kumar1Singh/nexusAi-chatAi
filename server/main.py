@@ -34,8 +34,9 @@ import images  # noqa: E402
 import llm  # noqa: E402
 import store  # noqa: E402
 import tts  # noqa: E402
+import video  # noqa: E402
 from agent import stream_chat  # noqa: E402  (needs env loaded first)
-from tools import IMAGE_PATH, registry  # noqa: E402
+from tools import IMAGE_PATH, VIDEO_PATH, registry  # noqa: E402
 
 app = FastAPI(title="Nexus AI agent", version="1.0.0")
 
@@ -101,6 +102,18 @@ class ImageRequest(BaseModel):
     seed: Optional[int] = None
 
 
+class VideoRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=1200)
+    # Bounded here as well as clamped in video.py: this is the open edge, and
+    # 300 seconds of nova-reel is $24 of someone else's money.
+    duration: Optional[int] = Field(default=None, ge=1, le=15)
+    aspect: Optional[str] = None
+    style: Optional[str] = None
+    resolution: Optional[str] = None
+    audio: bool = False
+    seed: Optional[int] = None
+
+
 class SpeechRequest(BaseModel):
     text: str = Field(..., min_length=1)
     voice: Optional[str] = None
@@ -133,6 +146,7 @@ def health():
         "auth_required": bool(AGENT_TOKEN),
         "speech": tts.status(),
         "images": images.status(),
+        "video": video.status(),
     }
 
 
@@ -260,6 +274,82 @@ def image_bytes(image_id: str):
         content=found["data"],
         media_type=found["mime"],
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/videos")
+def video_status(x_user_email: UserEmail = Header(default=None)):
+    """Which video model the Tools page will use, and what it has made before.
+
+    Mirrors /images exactly, including composing the URL here from the id --
+    the id is the durable half, the path is this app's routing.
+    """
+    recent = [
+        {
+            **{k: v for k, v in row.items() if k not in ("user_email", "mime", "bytes")},
+            "url": VIDEO_PATH.format(row["id"]),
+        }
+        for row in store.list_videos(x_user_email)
+        if row.get("id")
+    ]
+    return {**video.status(), "recent": recent}
+
+
+@app.post("/videos/generate")
+def video_generate(req: VideoRequest, x_user_email: UserEmail = Header(default=None)):
+    """Generate one clip and return the id it is served under.
+
+    `def`, not `async def`, for the same reason as /images/generate, only more
+    so: this blocks for one to three minutes on the provider, and that must not
+    sit on the event loop the chat stream is riding on.
+    """
+    try:
+        result = video.generate(
+            req.prompt,
+            duration=req.duration,
+            aspect=req.aspect,
+            style=req.style,
+            resolution=req.resolution,
+            audio=req.audio,
+            seed=req.seed,
+        )
+    except ValueError as exc:
+        # Something the caller can fix: an empty prompt, or no key configured.
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        # 502: the provider failed, not us. The message is its own wording.
+        raise HTTPException(status_code=502, detail=str(exc) or type(exc).__name__)
+
+    meta = {k: v for k, v in result.items() if k not in ("data", "mime", "full_prompt")}
+    try:
+        video_id = store.save_video(result["data"], result["mime"], meta, x_user_email)
+    except ValueError as exc:
+        # The clip exists but will not fit. It has already been paid for, so say
+        # exactly what to change rather than reporting a generic failure.
+        raise HTTPException(status_code=413, detail=str(exc))
+
+    return {"id": video_id, "url": VIDEO_PATH.format(video_id), **meta}
+
+
+@app.get("/videos/{video_id}")
+def video_bytes(video_id: str):
+    """Serve one stored clip.
+
+    Accept-Ranges matters here in a way it does not for a picture: without it a
+    browser cannot seek in the video element, and Safari will not play at all.
+    """
+    found = store.get_video(video_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Video not found or expired")
+
+    return Response(
+        content=found["data"],
+        media_type=found["mime"],
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(len(found["data"])),
+        },
     )
 
 

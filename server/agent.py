@@ -29,7 +29,12 @@ MAX_TOOL_ROUNDS = 5
 # provider, and a model that decides its first attempt was not good enough
 # would happily spend all five rounds redrawing it. Everything else is
 # deduplicated by arguments.
-ONCE_PER_TURN = {"web_search", "ask_options", "generate_image"}
+#
+# generate_video is capped hardest of all, because both halves of that argument
+# are worse for it: a clip costs cents rather than fractions of one, and takes
+# minutes rather than seconds, so a model retrying it twice would bill the user
+# twice and stall the turn past any reasonable wait.
+ONCE_PER_TURN = {"web_search", "ask_options", "generate_image", "generate_video"}
 
 # How hard gpt-oss thinks before it answers. Groq's default is "medium", which
 # costs a second or two of silence per round -- unnoticeable in a written chat,

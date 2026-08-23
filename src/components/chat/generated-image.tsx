@@ -148,8 +148,14 @@ export function GeneratedImageCard({
 export function parseGeneratedImage(result?: string): GeneratedImage | null {
   if (!result) return null;
   try {
-    const parsed = JSON.parse(result) as Partial<GeneratedImage> & { error?: string };
+    const parsed = JSON.parse(result) as Partial<GeneratedImage> & {
+      error?: string;
+      duration?: number;
+    };
     if (parsed.error || !parsed.url) return null;
+    // A generate_video result carries a url too. Duration is the field only a
+    // clip has, so it is what tells the two results apart.
+    if (typeof parsed.duration === "number") return null;
     return {
       url: parsed.url,
       prompt: parsed.prompt ?? "Generated image",

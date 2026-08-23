@@ -47,6 +47,8 @@ export type ToolInfo = {
   writes: boolean;
   /** False for tools the model invokes on its own, which stay out of the routing menu. */
   routable?: boolean;
+  /** False when the tool is configured off (no key), so it is not offered to the model. */
+  available?: boolean;
 };
 
 /** One picture the image tool produced, as the agent describes it. */
@@ -82,6 +84,52 @@ export type ImageToolStatus = {
   styles: string[];
   recent?: GeneratedImage[];
   quota?: ImageQuota;
+};
+
+/** One clip the video tool produced, as the agent describes it. */
+export type GeneratedVideo = {
+  /** Path on this origin -- /api/videos/<id>. Never the provider's own link. */
+  url: string;
+  prompt: string;
+  /** Length in seconds, as generated -- may be shorter than requested if the
+   *  configured model could not reach the asked-for rung. */
+  duration: number;
+  aspect: string;
+  aspect_ratio: string;
+  resolution?: string;
+  style?: string;
+  audio?: boolean;
+  provider: string;
+  model: string;
+  cost_usd?: number;
+  created_at?: string;
+};
+
+export type VideoQuota = {
+  plan: "free" | "paid" | "none";
+  maxVideos: number;
+  usedVideos: number;
+  remainingVideos: number;
+  canGenerate: boolean;
+};
+
+/** What the video tool is configured to do, from the Python side. */
+export type VideoToolStatus = {
+  available: boolean;
+  provider: string;
+  model: string;
+  key_loaded: boolean;
+  /** Only the lengths the configured model can actually produce. */
+  durations: number[];
+  default_duration: number;
+  aspects: string[];
+  resolutions: string[];
+  styles: string[];
+  cost_per_second: number;
+  /** Set when the tool is off, explaining why. Empty when it is working. */
+  note?: string;
+  recent?: GeneratedVideo[];
+  quota?: VideoQuota;
 };
 
 /** Fired after a turn creates or updates a conversation, so the sidebar refetches. */

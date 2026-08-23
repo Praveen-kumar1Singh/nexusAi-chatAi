@@ -655,3 +655,141 @@ def list_images(user_email: Optional[str] = None, limit: int = 24) -> List[Dict[
             if doc.get("user_email") == owner
         ]
     return list(reversed(rows))[:limit]
+
+
+# --------------------------------------------------------------------------
+# Generated videos
+# --------------------------------------------------------------------------
+
+# Kept for less time than pictures, and the arithmetic is the reason: a 720p
+# clip is several megabytes where a PNG is one, so the same retention window
+# would fill a 512MB cluster many times faster. Set 0 to keep forever.
+VIDEO_RETENTION_DAYS = int(os.environ.get("VIDEO_RETENTION_DAYS", "14") or 0)
+
+# Far fewer than images in the RAM fallback, for the same reason at a smaller
+# scale -- twenty clips would be most of a small instance's memory.
+MAX_MEMORY_VIDEOS = 4
+
+# One BSON document caps at 16MB, and the bytes are stored inline the way an
+# image is. This stops short of that with room for the metadata, so an oversized
+# clip fails with a sentence someone can act on instead of a driver-level error
+# about document size. A file that trips this is the signal to move to GridFS.
+MAX_VIDEO_BYTES = 15 * 1024 * 1024
+
+_memory_videos: Dict[str, Dict[str, Any]] = {}
+_video_index_ready = False
+
+
+def _videos_collection():
+    """The videos collection with its TTL index in place, or None."""
+    global _video_index_ready
+    db = _get_db()
+    if db is None:
+        return None
+
+    if not _video_index_ready:
+        try:
+            db.videos.create_index([("user_email", 1), ("created_at", -1)])
+            if VIDEO_RETENTION_DAYS > 0:
+                db.videos.create_index("expires_at", expireAfterSeconds=0)
+            _video_index_ready = True
+        except Exception as err:
+            print("[MongoDB] video index warning:", err)
+
+    return db.videos
+
+
+def save_video(
+    data: bytes,
+    mime: str,
+    meta: Dict[str, Any],
+    user_email: Optional[str] = None,
+) -> str:
+    """Store one generated clip and return the id it is served under.
+
+    Raises ValueError when the file is too large to store inline, which the
+    caller turns into a message asking for a lower resolution -- the clip has
+    already been paid for by then, so failing silently would waste it.
+    """
+    from datetime import timedelta
+
+    if len(data) > MAX_VIDEO_BYTES:
+        raise ValueError(
+            "That clip is {:.1f}MB, over the {}MB an inline document can hold. "
+            "Generate it at a lower resolution or a shorter length.".format(
+                len(data) / 1024 / 1024, MAX_VIDEO_BYTES // 1024 // 1024
+            )
+        )
+
+    video_id = uuid.uuid4().hex[:16]
+    doc: Dict[str, Any] = {
+        "id": video_id,
+        "user_email": _owner(user_email),
+        "mime": mime,
+        "created_at": _now(),
+        **{k: v for k, v in meta.items() if k != "data"},
+    }
+
+    collection = _videos_collection()
+    if collection is not None:
+        try:
+            # pyrefly: ignore [missing-import]
+            from bson import Binary
+
+            stored = dict(doc)
+            stored["data"] = Binary(data)
+            if VIDEO_RETENTION_DAYS > 0:
+                stored["expires_at"] = datetime.now(timezone.utc) + timedelta(days=VIDEO_RETENTION_DAYS)
+            collection.insert_one(stored)
+            return video_id
+        except Exception as err:
+            print("[MongoDB] save_video error:", err)
+
+    with _lock:
+        _memory_videos[video_id] = {**doc, "data": data}
+        while len(_memory_videos) > MAX_MEMORY_VIDEOS:
+            _memory_videos.pop(next(iter(_memory_videos)))
+    return video_id
+
+
+def get_video(video_id: str) -> Optional[Dict[str, Any]]:
+    """The bytes and content type for one clip, or None if it is gone."""
+    collection = _videos_collection()
+    if collection is not None:
+        try:
+            found = collection.find_one({"id": video_id})
+            if found:
+                return {"data": bytes(found["data"]), "mime": found.get("mime", "video/mp4")}
+        except Exception as err:
+            print("[MongoDB] get_video error:", err)
+
+    with _lock:
+        found = _memory_videos.get(video_id)
+        return {"data": found["data"], "mime": found.get("mime", "video/mp4")} if found else None
+
+
+def list_videos(user_email: Optional[str] = None, limit: int = 12) -> List[Dict[str, Any]]:
+    """Recent clips for one account, newest first, without the bytes."""
+    owner = _owner(user_email)
+    if owner is None:
+        return []
+
+    collection = _videos_collection()
+    if collection is not None:
+        try:
+            cursor = (
+                collection.find({"user_email": owner}, {"_id": 0, "data": 0, "expires_at": 0})
+                .sort("created_at", -1)
+                .limit(limit)
+            )
+            return list(cursor)
+        except Exception as err:
+            print("[MongoDB] list_videos error:", err)
+
+    with _lock:
+        rows = [
+            {k: v for k, v in doc.items() if k != "data"}
+            for doc in _memory_videos.values()
+            if doc.get("user_email") == owner
+        ]
+    return list(reversed(rows))[:limit]

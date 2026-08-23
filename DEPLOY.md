@@ -35,6 +35,9 @@ Environment variables to set on Render:
 | `MONGODB_URI` | the Atlas connection string |
 | `MONGODB_DB` | `mantraa_ai` |
 | `AGENT_TOKEN` | a long random string -- **the same one goes on Vercel** |
+| `IMAGE_API_KEY` | optional -- image generation falls back to a keyless provider without it |
+| `VIDEO_API_KEY` | **required for video**, which has no keyless fallback. Unset, the Video Generator reports itself off and the agent is not offered the tool |
+| `VIDEO_MODEL` | optional -- picks both the price and the lengths on offer (see README) |
 | `LLM_MODEL`, `TOPIC_POLICY`, `ASSISTANT_NAME` | optional, defaults in `render.yaml` |
 | `PYTHON_VERSION` | `3.11.9` |
 
@@ -61,6 +64,15 @@ Import the same repo; the defaults for a Next.js project are correct and
 | `AGENT_URL` | `https://<service>.onrender.com` -- no trailing slash |
 | `AGENT_TOKEN` | the same value as on Render |
 | `MONGODB_URI`, `MONGODB_DB` | Atlas -- Next.js reads it directly for auth, sessions and credits |
+
+**Video generation needs a Vercel plan that allows long functions.** A clip
+takes one to three minutes on the provider, and `/api/videos/generate` holds the
+request open for all of it -- it declares `maxDuration = 300`, which Hobby caps
+at 60 seconds. On Hobby the request is killed mid-render while the agent on
+Render carries on and finishes, so the clip is generated, stored and billed, but
+the browser sees a timeout instead of a video. Either deploy on Pro or leave
+`VIDEO_API_KEY` unset, which switches the feature off cleanly rather than
+half-working. Image generation is unaffected: it fits inside 60 seconds.
 
 **`MONGODB_DB` is required on Vercel, not optional.** Without it `getDb` refuses
 rather than falling back to `test`, and every signed-in request answers 503 --

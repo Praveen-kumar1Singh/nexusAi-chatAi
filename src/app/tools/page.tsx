@@ -2,9 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Image as ImageIcon, Globe, ListChecks, Wrench } from "lucide-react";
+import {
+  ArrowRight,
+  Image as ImageIcon,
+  Globe,
+  ListChecks,
+  Video as VideoIcon,
+  Wrench,
+} from "lucide-react";
 import { AppShell } from "@/components/chat/app-shell";
 import type { ToolInfo } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 /**
  * The tools hub.
@@ -23,12 +31,20 @@ const OPENABLE = [
     blurb: "Describe a picture and get it back in seconds. Also available in chat -- just ask.",
     tag: "Text to image",
   },
+  {
+    href: "/tools/video",
+    icon: VideoIcon,
+    title: "Video Generator",
+    blurb: "Describe a scene and get a short clip back. 5-15 seconds, also available in chat.",
+    tag: "Text to video",
+  },
 ] as const;
 
 const AGENT_ICONS: Record<string, typeof Globe> = {
   web_search: Globe,
   ask_options: ListChecks,
   generate_image: ImageIcon,
+  generate_video: VideoIcon,
 };
 
 function Tools() {
@@ -100,9 +116,23 @@ function Tools() {
                 const Icon = AGENT_ICONS[tool.name] ?? Wrench;
                 return (
                   <div key={tool.name} className="flex gap-3 p-3.5">
-                    <Icon className="mt-0.5 size-4 shrink-0 text-primary" />
+                    <Icon
+                      className={cn(
+                        "mt-0.5 size-4 shrink-0",
+                        tool.available === false ? "text-muted-foreground/40" : "text-primary",
+                      )}
+                    />
                     <div className="min-w-0 space-y-1">
-                      <p className="font-mono text-[12.5px] text-foreground">{tool.name}</p>
+                      <p className="flex items-center gap-2 font-mono text-[12.5px] text-foreground">
+                        {tool.name}
+                        {/* Configured off, not broken -- the agent genuinely
+                            cannot call it, so the list says why. */}
+                        {tool.available === false && (
+                          <span className="rounded-full border border-border bg-background px-1.5 py-0.5 font-sans text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                            needs a key
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[12.5px] leading-snug text-muted-foreground">
                         {tool.description}
                       </p>

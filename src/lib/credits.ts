@@ -179,3 +179,118 @@ export async function chargeImageQuota(email: string | null): Promise<Response |
 
   return null;
 }
+
+/**
+ * Video quota, kept separate from images because the unit cost is not comparable.
+ *
+ * A generated image costs a fraction of a cent; a 10s clip costs about $0.25 at
+ * the configured default model, against a Pro plan priced at ₹299 (~$3.40) a
+ * month. So the allowances are small on purpose -- five Pro clips is roughly a
+ * third of the subscription, and that is before the 15 images are paid for.
+ * Raising these is a pricing decision, not a config tweak.
+ */
+const VIDEO_LIMITS = { paid: 5, free: 1 } as const;
+
+export interface VideoQuotaInfo {
+  plan: "free" | "paid" | "none";
+  maxVideos: number;
+  usedVideos: number;
+  remainingVideos: number;
+  canGenerate: boolean;
+}
+
+export async function getVideoQuotaStatus(email: string | null): Promise<VideoQuotaInfo> {
+  if (!email) {
+    return {
+      plan: "free",
+      maxVideos: VIDEO_LIMITS.free,
+      usedVideos: 0,
+      remainingVideos: VIDEO_LIMITS.free,
+      canGenerate: true,
+    };
+  }
+
+  try {
+    const { getDb } = await import("@/lib/mongodb");
+    const db = await getDb();
+    const user = await db.collection("users").findOne({ email });
+
+    const plan = (user?.plan as "free" | "paid" | "none") ?? "free";
+    const expired =
+      plan === "paid" && user?.planExpiresAt && new Date(user.planExpiresAt).getTime() < Date.now();
+
+    const effectivePlan = expired ? "free" : plan;
+    const maxVideos = effectivePlan === "paid" ? VIDEO_LIMITS.paid : VIDEO_LIMITS.free;
+    const usedVideos = typeof user?.videosGenerated === "number" ? user.videosGenerated : 0;
+
+    return {
+      plan: effectivePlan,
+      maxVideos,
+      usedVideos,
+      remainingVideos: Math.max(0, maxVideos - usedVideos),
+      canGenerate: maxVideos - usedVideos > 0,
+    };
+  } catch {
+    return {
+      plan: "free",
+      maxVideos: VIDEO_LIMITS.free,
+      usedVideos: 0,
+      remainingVideos: VIDEO_LIMITS.free,
+      canGenerate: true,
+    };
+  }
+}
+
+export async function chargeVideoQuota(email: string | null): Promise<Response | null> {
+  if (!email) return null;
+
+  try {
+    const { getDb } = await import("@/lib/mongodb");
+    const db = await getDb();
+    const users = db.collection("users");
+    const user = await users.findOne({ email });
+
+    const plan = (user?.plan as "free" | "paid" | "none") ?? "free";
+    const expired =
+      plan === "paid" && user?.planExpiresAt && new Date(user.planExpiresAt).getTime() < Date.now();
+
+    if (expired) {
+      return Response.json(
+        {
+          error:
+            "Your Pro subscription (₹299/month) has expired. Please renew your plan to continue generating videos.",
+          code: "SUBSCRIPTION_EXPIRED",
+        },
+        { status: 402 },
+      );
+    }
+
+    const effectivePlan = expired ? "free" : plan;
+    const maxVideos = effectivePlan === "paid" ? VIDEO_LIMITS.paid : VIDEO_LIMITS.free;
+    const usedVideos = typeof user?.videosGenerated === "number" ? user.videosGenerated : 0;
+
+    if (usedVideos >= maxVideos) {
+      return Response.json(
+        {
+          error:
+            effectivePlan === "free"
+              ? `Free tier allows only ${VIDEO_LIMITS.free} video generation. Please upgrade to the Pro Plan (₹299/month) to generate ${VIDEO_LIMITS.paid} videos per month.`
+              : `Monthly limit reached (${maxVideos}/${maxVideos} videos generated). Your quota will reset on your next billing cycle.`,
+          code:
+            effectivePlan === "free" ? "FREE_VIDEO_LIMIT_REACHED" : "MONTHLY_VIDEO_LIMIT_REACHED",
+          limitReached: true,
+        },
+        { status: 402 },
+      );
+    }
+
+    // Charged before the clip is made, like images. A generation that then fails
+    // has still cost the provider nothing, but it has cost the user a slot --
+    // the same trade the image path already makes, kept consistent on purpose.
+    await users.updateOne({ email }, { $inc: { videosGenerated: 1 } });
+  } catch (err) {
+    console.warn("[video-quota] check warning:", err);
+  }
+
+  return null;
+}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AudioLines,
+  ChevronDown,
   ChevronsLeft,
   ChevronsRight,
   Hexagon,
@@ -12,6 +13,8 @@ import {
   MessageSquare,
   Plus,
   Trash2,
+  Video as VideoIcon,
+  Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -33,11 +36,10 @@ function groupOf(iso: string): string {
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 Days", "Older"];
 
-/** Main navigation links in the sidebar. */
-const SECTIONS = [
+/** Main top navigation links in the sidebar. */
+const MAIN_SECTIONS = [
   { href: "/", label: "Chat", icon: MessageSquare },
   { href: "/voice", label: "AI Voice Chat", icon: AudioLines },
-  { href: "/tools/image", label: "Image Generator", icon: ImageIcon },
 ] as const;
 
 function cleanTitle(rawTitle: string): string {
@@ -97,6 +99,12 @@ export function AppSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const onChatPage = pathname === "/";
+
+  const isToolsActive = pathname.startsWith("/tools");
+  const [userToggledTools, setUserToggledTools] = useState<boolean | null>(null);
+
+  // Synchronous state resolution: stays open smoothly on /tools/* routes with zero transition flicker
+  const toolsOpen = userToggledTools !== null ? userToggledTools : isToolsActive;
 
   useEffect(() => {
     setMounted(true);
@@ -216,8 +224,8 @@ export function AppSidebar({
         )}
       </div>
 
-      <nav className="space-y-0.5 px-3 pb-3">
-        {SECTIONS.map((section) => {
+      <nav className="space-y-0.5 px-3 pb-2">
+        {MAIN_SECTIONS.map((section) => {
           const current = pathname === section.href;
           return (
             <Link
@@ -230,7 +238,7 @@ export function AppSidebar({
                 "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
                 collapsed && "justify-center px-0",
                 current
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground font-semibold"
                   : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
               )}
             >
@@ -239,6 +247,81 @@ export function AppSidebar({
             </Link>
           );
         })}
+
+        {/* All Tools Accordion Header */}
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              if (collapsed) {
+                onToggle();
+                setUserToggledTools(true);
+              } else {
+                setUserToggledTools(!toolsOpen);
+              }
+            }}
+            title={collapsed ? "All Tools" : undefined}
+            className={cn(
+              "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm transition-colors cursor-pointer select-none",
+              collapsed && "justify-center px-0",
+              isToolsActive
+                ? "bg-sidebar-accent/50 text-sidebar-accent-foreground font-medium"
+                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+            )}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <Wrench className={cn("size-4 shrink-0", isToolsActive && "text-primary")} />
+              {!collapsed && <span>All Tools</span>}
+            </div>
+            {!collapsed && (
+              <ChevronDown
+                className={cn(
+                  "size-3.5 text-muted-foreground/70 transition-transform duration-300 ease-in-out shrink-0",
+                  toolsOpen && "rotate-180 text-primary",
+                )}
+              />
+            )}
+          </button>
+
+          {/* Smooth Dropdown Content */}
+          {!collapsed && (
+            <div
+              className={cn(
+                "grid transition-[grid-template-rows,opacity] duration-300 ease-in-out pl-3.5 border-l border-sidebar-border/60 ml-4.5 my-1",
+                toolsOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0 overflow-hidden pointer-events-none",
+              )}
+            >
+              <div className="overflow-hidden space-y-0.5 pt-0.5">
+                <Link
+                  href="/tools/image"
+                  onClick={() => onItemClick?.()}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
+                    pathname === "/tools/image"
+                      ? "bg-sidebar-accent text-primary font-semibold"
+                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                  )}
+                >
+                  <ImageIcon className="size-3.5 shrink-0 opacity-70" />
+                  <span>Image Generator</span>
+                </Link>
+                <Link
+                  href="/tools/video"
+                  onClick={() => onItemClick?.()}
+                  className={cn(
+                    "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
+                    pathname === "/tools/video"
+                      ? "bg-sidebar-accent text-primary font-semibold"
+                      : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                  )}
+                >
+                  <VideoIcon className="size-3.5 shrink-0 opacity-70" />
+                  <span>Video Generator</span>
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
       </nav>
 
       {mounted && !sessionLoading && signedIn && (
