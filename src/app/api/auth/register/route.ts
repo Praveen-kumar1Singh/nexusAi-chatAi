@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { DB_UNREACHABLE, getDb } from "@/lib/mongodb";
+import { DB_UNREACHABLE, dbErrorMessage, getDb } from "@/lib/mongodb";
 import { startSession } from "@/lib/session";
 
 /** What the Free Starter plan is worth, matching PlanActivationModal. */
@@ -24,8 +24,8 @@ export async function POST(req: Request) {
   try {
     db = await getDb();
   } catch (err) {
-    console.error("[Auth Register] Database unreachable:", err);
-    return NextResponse.json({ error: DB_UNREACHABLE }, { status: 503 });
+    console.error("[Auth Register] Database unavailable:", err);
+    return NextResponse.json({ error: dbErrorMessage(err) }, { status: 503 });
   }
 
   try {

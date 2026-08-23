@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { DB_UNREACHABLE, getDb } from "@/lib/mongodb";
+import { DB_UNREACHABLE, dbErrorMessage, getDb } from "@/lib/mongodb";
 import { startSession } from "@/lib/session";
 
 export async function POST(req: Request) {
@@ -20,9 +20,14 @@ export async function POST(req: Request) {
   try {
     db = await getDb();
   } catch (err) {
-    console.error("[Auth Login] Database unreachable:", err);
+    console.error("[Auth Login] Database unavailable:", err);
     return NextResponse.json(
-      { error: DB_UNREACHABLE.replace("your account was not saved", "you cannot be signed in") },
+      {
+        error: dbErrorMessage(err).replace(
+          "your account was not saved",
+          "you cannot be signed in",
+        ),
+      },
       { status: 503 },
     );
   }

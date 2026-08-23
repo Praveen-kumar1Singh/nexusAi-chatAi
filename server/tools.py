@@ -10,6 +10,8 @@ import json
 from typing import Any, Callable, Dict, List
 
 import duckduckgo
+import images
+import store
 
 # --------------------------------------------------------------------------
 # implementations
@@ -77,6 +79,57 @@ def ask_options(question: str, options: List[str]) -> Dict[str, Any]:
     }
 
 
+# Where the browser fetches a stored image. The Next.js route of the same shape
+# proxies to this service, so the picture arrives from our own origin -- see
+# images.py for why nothing hands the provider's own link to the page.
+IMAGE_PATH = "/api/images/{}"
+
+
+def generate_image(prompt: str, size: str = "square", style: str = "none") -> Dict[str, Any]:
+    """Draw a picture from a written description.
+
+    The bytes are stored on the way through and only the id comes back: a data
+    URL would put a megabyte of base64 into the conversation document, the
+    stream and every later read of the thread.
+    """
+    prompt = str(prompt or "").strip()
+    if not prompt:
+        raise ValueError("Describe what the image should show")
+
+    result = images.generate(prompt, size=size, style=style)
+    image_id = store.save_image(
+        result["data"],
+        result["mime"],
+        {
+            "prompt": result["prompt"],
+            "style": result["style"],
+            "size": result["size"],
+            "width": result["width"],
+            "height": result["height"],
+            "seed": result["seed"],
+            "provider": result["provider"],
+            "model": result["model"],
+            "bytes": result["bytes"],
+        },
+    )
+
+    return {
+        "status": "generated",
+        "url": IMAGE_PATH.format(image_id),
+        "prompt": result["prompt"],
+        "size": result["size"],
+        "width": result["width"],
+        "height": result["height"],
+        "provider": result["provider"],
+        "model": result["model"],
+        "instruction": (
+            "The image is already on screen -- the UI rendered it from this result. "
+            "Reply with one short line about what you made. Do not paste the URL, do "
+            "not describe the picture in detail, and do not call any more tools."
+        ),
+    }
+
+
 # --------------------------------------------------------------------------
 # schemas sent to Groq
 # --------------------------------------------------------------------------
@@ -115,6 +168,45 @@ TOOLS: Dict[str, Dict[str, Any]] = {
                         },
                     },
                     "required": ["question", "options"],
+                },
+            },
+        },
+    },
+    "generate_image": {
+        "fn": generate_image,
+        "reads": "an image model -- see server/images.py",
+        "writes": True,
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "generate_image",
+                "description": (
+                    "Create an image from a written description. Use this whenever the "
+                    "user asks you to draw, generate, design, illustrate or picture "
+                    "something, or asks for a logo, poster, icon, wallpaper or concept "
+                    "art. Write the prompt yourself: expand what they said into one "
+                    "vivid sentence naming the subject, setting, lighting and mood. You "
+                    "get one image per message, so do not call this twice."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "One vivid sentence describing the picture: subject, setting, lighting, mood.",
+                        },
+                        "size": {
+                            "type": "string",
+                            "enum": ["square", "portrait", "landscape"],
+                            "description": "Shape of the image. Square unless the subject suggests otherwise.",
+                        },
+                        "style": {
+                            "type": "string",
+                            "enum": ["none", "photo", "art", "anime", "3d", "sketch"],
+                            "description": "Visual treatment. Use 'none' unless the user named a look.",
+                        },
+                    },
+                    "required": ["prompt"],
                 },
             },
         },
@@ -203,7 +295,7 @@ def registry() -> List[Dict[str, Any]]:
                     for key, spec in params.items()
                 ],
                 "reads": entry.get("reads", "unspecified"),
-                "writes": False,
+                "writes": bool(entry.get("writes", False)),
                 "routable": entry.get("routable", True),
             }
         )

@@ -146,6 +146,9 @@ touches one file.
 | `server/tools.py` | Tool schemas, implementations, and the registry |
 | `server/store.py` | In-memory conversations and activity |
 | `server/duckduckgo.py` | DuckDuckGo search client |
+| `server/images.py` | Text-to-image provider resolution and generation |
+| `src/app/tools/` | AI Tools hub and the Image Generator page |
+| `src/components/chat/generated-image.tsx` | Renders a generated image in chat or the gallery |
 
 ## LLM tools
 
@@ -154,6 +157,7 @@ and every call is recorded to the activity log with its duration.
 
 - **`ask_options`** — ask the user to pick from 3 choices before answering (`question`, `options`); the UI renders them as buttons
 - **`web_search`** — search the public web via DuckDuckGo (`query`); returns the single best result, once per message
+- **`generate_image`** — draw a picture from a description (`prompt`, `size`, `style`); the image appears in the turn, once per message
 
 While a tool runs the chat shows a one-line status ("Searching the web…"). On
 success the line disappears and only the answer remains — raw arguments and
@@ -365,6 +369,43 @@ constant to get more results back.
 
 If searches start failing, you are being rate-limited; wait a few minutes. For
 heavy use, swap in a keyed search API — only `duckduckgo.py` would change.
+
+### Image generation
+
+Ask for a picture in chat ("draw a fox in tall grass") and the agent calls
+`generate_image`; the image renders in the turn and stays with the saved thread.
+The same tool has its own page under **AI Tools -> Image Generator** in the
+sidebar, with style and shape controls and a gallery of what the account has
+made.
+
+**No setup required.** `server/images.py` resolves its own provider the way
+`llm.py` does, but falls back to a keyless one, so a fresh clone can generate
+without an account:
+
+| Key | Provider | Model |
+| --- | --- | --- |
+| *(none)* | Pollinations | FLUX |
+| `hf_...` | Hugging Face | FLUX.1-schnell |
+| `tgp_v1_...` | Together AI | FLUX.1-schnell-Free |
+| `sk-...` | OpenAI | gpt-image-1 |
+| `AIza...` | Google | gemini-2.5-flash-image |
+
+Set `IMAGE_API_KEY` and the provider follows; `IMAGE_PROVIDER`, `IMAGE_MODEL` and
+`IMAGE_BASE_URL` override it. Groq is absent because it serves no image model,
+which is why this resolves separately from the chat provider.
+
+**Bytes are stored once, never linked.** Every provider hands back an image here,
+which goes into MongoDB and is served from `/api/images/<id>` — so a saved
+conversation still renders after the provider's temporary link has expired, and
+one generation is paid for exactly once. Only the short id travels in the
+conversation document; a base64 data URL would put a megabyte into the stream and
+into every later read of the thread. Images expire after `IMAGE_RETENTION_DAYS`
+(default 30) because a 1024px PNG is over a megabyte and Atlas' free tier is
+512 MB.
+
+**One image per message**, via `ONCE_PER_TURN` in `agent.py` — a model that
+decides its first attempt was not good enough would otherwise spend every
+remaining round redrawing it, on a provider that may bill per call.
 
 ### The tool loop
 

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ToastContainer } from "@/components/ui/toast";
+import { ThemeProvider } from "@/lib/theme";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,10 +24,6 @@ export const metadata: Metadata = {
   },
 };
 
-import Script from "next/script";
-import { ToastContainer } from "@/components/ui/toast";
-import { ThemeProvider } from "@/lib/theme";
-
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -36,9 +34,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <link rel="icon" type="image/png" href="/nexus-logo.png" />
         <link rel="apple-touch-icon" href="/nexus-logo.png" />
-        <Script
+        <script
           id="theme-init"
-          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `
               try {

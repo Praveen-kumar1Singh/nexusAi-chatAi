@@ -30,11 +30,12 @@ from pydantic import BaseModel, Field
 load_dotenv(Path(__file__).resolve().parent.parent / ".env.local")
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+import images  # noqa: E402
 import llm  # noqa: E402
 import store  # noqa: E402
 import tts  # noqa: E402
 from agent import stream_chat  # noqa: E402  (needs env loaded first)
-from tools import registry  # noqa: E402
+from tools import IMAGE_PATH, registry  # noqa: E402
 
 app = FastAPI(title="Nexus AI agent", version="1.0.0")
 
@@ -93,6 +94,13 @@ class AuthRequest(BaseModel):
     password_hash: str
 
 
+class ImageRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=1200)
+    size: Optional[str] = None
+    style: Optional[str] = None
+    seed: Optional[int] = None
+
+
 class SpeechRequest(BaseModel):
     text: str = Field(..., min_length=1)
     voice: Optional[str] = None
@@ -124,6 +132,7 @@ def health():
         "storage": store.status(),
         "auth_required": bool(AGENT_TOKEN),
         "speech": tts.status(),
+        "images": images.status(),
     }
 
 
@@ -192,6 +201,65 @@ def tts_speak(req: SpeechRequest):
         content=audio,
         media_type="audio/wav",
         headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/images")
+def image_status(x_user_email: UserEmail = Header(default=None)):
+    """Which image model the Tools page will use, and what it has made before.
+
+    The stored row holds the id and not the path -- the id is the durable half,
+    the path is this app's routing -- so the URL is composed here, from the same
+    constant the chat tool returns. A row without one renders as nothing at all.
+    """
+    recent = [
+        {
+            **{k: v for k, v in row.items() if k not in ("user_email", "mime", "bytes")},
+            "url": IMAGE_PATH.format(row["id"]),
+        }
+        for row in store.list_images(x_user_email)
+        if row.get("id")
+    ]
+    return {**images.status(), "recent": recent}
+
+
+@app.post("/images/generate")
+def image_generate(req: ImageRequest, x_user_email: UserEmail = Header(default=None)):
+    """Generate one image and return the id it is served under.
+
+    `def`, not `async def`, for the same reason as /tts: a generation blocks for
+    seconds on a provider round trip, and FastAPI keeps that off the event loop
+    the chat stream is riding on.
+    """
+    try:
+        result = images.generate(req.prompt, req.size, req.style, req.seed)
+    except ValueError as exc:
+        # Something the caller can fix: an empty prompt, or no provider set up.
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        # 502: the provider failed, not us. The message is its own wording.
+        raise HTTPException(status_code=502, detail=str(exc) or type(exc).__name__)
+
+    meta = {k: v for k, v in result.items() if k not in ("data", "mime", "full_prompt")}
+    image_id = store.save_image(result["data"], result["mime"], meta, x_user_email)
+    return {"id": image_id, "url": IMAGE_PATH.format(image_id), **meta}
+
+
+@app.get("/images/{image_id}")
+def image_bytes(image_id: str):
+    """Serve one stored image.
+
+    Addressed by a content id that is never reused, so it can be cached hard --
+    which is what keeps reopening a thread full of pictures free.
+    """
+    found = store.get_image(image_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Image not found or expired")
+
+    return Response(
+        content=found["data"],
+        media_type=found["mime"],
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 

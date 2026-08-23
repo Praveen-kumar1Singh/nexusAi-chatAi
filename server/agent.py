@@ -24,8 +24,12 @@ from tools import run_tool, tool_schemas
 MAX_TOOL_ROUNDS = 5
 
 # Web search is slow, rate-limited, and rewording a failed query rarely helps --
-# so it runs at most once per turn. Everything else is deduplicated by arguments.
-ONCE_PER_TURN = {"web_search", "ask_options"}
+# so it runs at most once per turn. Image generation is capped for a blunter
+# reason: it is the one tool here that costs real money per call on a keyed
+# provider, and a model that decides its first attempt was not good enough
+# would happily spend all five rounds redrawing it. Everything else is
+# deduplicated by arguments.
+ONCE_PER_TURN = {"web_search", "ask_options", "generate_image"}
 
 # How hard gpt-oss thinks before it answers. Groq's default is "medium", which
 # costs a second or two of silence per round -- unnoticeable in a written chat,
@@ -67,6 +71,11 @@ When a question is ambiguous and the answer would genuinely differ by choice --
 above all, a programming concept with no language named ("what is a for loop") --
 call ask_options first with 3 concrete choices instead of guessing or answering
 for every option at once. Once the user has chosen, answer for that choice only.
+
+Call generate_image when the user asks for a picture -- drawn, generated, designed,
+illustrated, a logo, poster, icon or wallpaper. The image is displayed by the UI
+from the tool result, so afterwards write one short line about what you made and
+nothing else: never paste the URL and never describe the picture back to them.
 
 If a tool returns an error, tell the user what failed plainly in natural language rather than printing raw JSON.
 

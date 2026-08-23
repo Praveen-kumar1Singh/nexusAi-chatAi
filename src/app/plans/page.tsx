@@ -28,16 +28,16 @@ declare global {
 
 const FAQS = [
   {
-    q: "How do the 50 free credits work?",
+    q: "How many AI images can I generate?",
+    a: "Free accounts get 1 free AI image generation. When you upgrade to the Pro Monthly Plan (₹299/month), you get 15 AI Image Generations per month along with unlimited AI Chat, Voice AI, and Web Search access.",
+  },
+  {
+    q: "How do the 50 free chat credits work?",
     a: "When you activate the Free Plan after logging in or registering, you receive 50 prompt credits instantly. Each message or prompt sent to Nexus AI consumes 1 credit.",
   },
   {
-    q: "What happens when I reach 0 credits?",
-    a: "Chatting and tool execution will pause once your credits reach 0. You can unlock unlimited chatting anytime by upgrading to the Pro Unlimited Plan using Razorpay.",
-  },
-  {
-    q: "How does the Pro Unlimited Plan work?",
-    a: "Pro Unlimited gives you lifetime unrestricted access to Nexus AI with zero credit limits, unlimited Web Search tool calls, and high-priority processing speed for ₹499.",
+    q: "What happens when I reach 0 credits or max image quota?",
+    a: "Chatting and image generation will pause once your free quota is reached. You can unlock 15 image generations per month and unlimited chatting anytime by subscribing to the Pro Monthly Plan for ₹299/month.",
   },
   {
     q: "Is payment via Razorpay secure?",
@@ -45,7 +45,7 @@ const FAQS = [
   },
   {
     q: "Can I switch or upgrade my plan anytime?",
-    a: "Yes! You can upgrade from the Free Starter plan to Pro Unlimited at any time directly from the Plans page or profile dropdown menu.",
+    a: "Yes! You can upgrade from the Free Starter plan to Pro Monthly at any time directly from the Plans page or profile dropdown menu.",
   },
 ];
 
@@ -256,6 +256,10 @@ export default function PlansPage() {
                   Included Features:
                 </p>
                 <ul className="space-y-2.5 text-xs text-muted-foreground">
+                  <li className="flex items-center gap-2 font-medium text-foreground">
+                    <Check className="size-4 text-emerald-400 shrink-0" />
+                    <span>1 Free AI Image Generation</span>
+                  </li>
                   <li className="flex items-center gap-2">
                     <Check className="size-4 text-emerald-400 shrink-0" />
                     <span>50 Total AI Chat Message turns</span>
@@ -322,13 +326,13 @@ export default function PlansPage() {
                 </span>
                 <Crown className="size-5 text-amber-400" />
               </div>
-              <h2 className="text-2xl font-bold text-foreground">Pro Unlimited</h2>
+              <h2 className="text-2xl font-bold text-foreground">Pro Monthly</h2>
               <div className="flex items-baseline gap-1">
                 <span className="text-4xl font-extrabold tracking-tight text-foreground">₹299</span>
                 <span className="text-sm text-muted-foreground">/ Month</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Complete, unrestricted access to AI chat, Voice AI calling, and tools. Renews monthly.
+                15 AI Image Generations/month + unrestricted access to AI chat, Voice AI calling, and tools. Renews monthly.
               </p>
 
               <div className="border-t border-border/80 pt-4 space-y-3">
@@ -336,6 +340,10 @@ export default function PlansPage() {
                   Everything in Free, plus:
                 </p>
                 <ul className="space-y-2.5 text-xs text-muted-foreground">
+                  <li className="flex items-center gap-2 font-medium text-foreground">
+                    <Check className="size-4 text-primary shrink-0" />
+                    <span>15 AI Image Generations / Month</span>
+                  </li>
                   <li className="flex items-center gap-2 font-medium text-foreground">
                     <Check className="size-4 text-primary shrink-0" />
                     <span>Unlimited AI Chat Messages &amp; Turns</span>
@@ -351,10 +359,6 @@ export default function PlansPage() {
                   <li className="flex items-center gap-2 font-medium text-foreground">
                     <Check className="size-4 text-primary shrink-0" />
                     <span>Priority Processing &amp; Zero Throttle</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="size-4 text-primary shrink-0" />
-                    <span>Instant Razorpay Payment Verification</span>
                   </li>
                 </ul>
               </div>
@@ -398,12 +402,17 @@ export default function PlansPage() {
                 <tr className="border-b border-border text-muted-foreground uppercase tracking-wider text-[11px]">
                   <th className="py-3 px-4">Feature</th>
                   <th className="py-3 px-4">Free Starter</th>
-                  <th className="py-3 px-4 text-primary font-bold">Pro Unlimited</th>
+                  <th className="py-3 px-4 text-primary font-bold">Pro Monthly (₹299)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
+                <tr className="bg-primary/5">
+                  <td className="py-3 px-4 font-bold text-foreground">AI Image Generations</td>
+                  <td className="py-3 px-4 font-semibold text-amber-500">1 Free Image</td>
+                  <td className="py-3 px-4 text-emerald-400 font-bold">15 Images / Month</td>
+                </tr>
                 <tr>
-                  <td className="py-3 px-4 font-medium">Credits Included</td>
+                  <td className="py-3 px-4 font-medium">AI Chat Credits</td>
                   <td className="py-3 px-4">50 Free Turns</td>
                   <td className="py-3 px-4 text-emerald-400 font-bold">Unlimited</td>
                 </tr>

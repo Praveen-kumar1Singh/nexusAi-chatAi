@@ -527,3 +527,131 @@ def list_tool_calls(limit: int = 100) -> List[Dict[str, Any]]:
 
     with _lock:
         return list(reversed(_memory_tool_calls[-limit:]))
+
+
+# --------------------------------------------------------------------------
+# Generated images
+# --------------------------------------------------------------------------
+
+# How long a generated picture is kept. Atlas' free tier is 512MB and a 1024px
+# PNG is over a megabyte, so images cannot be kept the way text turns are: an
+# unbounded gallery would fill the cluster and take the conversations with it.
+# A TTL index does the deleting, so nothing has to sweep. Set 0 to keep forever.
+IMAGE_RETENTION_DAYS = int(os.environ.get("IMAGE_RETENTION_DAYS", "30") or 0)
+
+# The memory fallback holds far fewer, for the same reason at a smaller scale:
+# this is RAM on a 512MB Render instance, not a disk.
+MAX_MEMORY_IMAGES = 20
+
+_memory_images: Dict[str, Dict[str, Any]] = {}
+_image_index_ready = False
+
+
+def _images_collection():
+    """The images collection with its TTL index in place, or None."""
+    global _image_index_ready
+    db = _get_db()
+    if db is None:
+        return None
+
+    if not _image_index_ready:
+        try:
+            db.images.create_index([("user_email", 1), ("created_at", -1)])
+            if IMAGE_RETENTION_DAYS > 0:
+                # Mongo expires on a real date, not the ISO strings used
+                # elsewhere in this file, so `expires_at` is stored separately.
+                db.images.create_index("expires_at", expireAfterSeconds=0)
+            _image_index_ready = True
+        except Exception as err:
+            print("[MongoDB] image index warning:", err)
+
+    return db.images
+
+
+def save_image(
+    data: bytes,
+    mime: str,
+    meta: Dict[str, Any],
+    user_email: Optional[str] = None,
+) -> str:
+    """Store one generated image and return the id it is served under.
+
+    Unlike conversations, a guest's image is stored too -- the id is the only way
+    to render it, and without one the picture the guest just asked for could not
+    be shown at all.
+    """
+    from datetime import timedelta
+
+    image_id = uuid.uuid4().hex[:16]
+    doc: Dict[str, Any] = {
+        "id": image_id,
+        "user_email": _owner(user_email),
+        "mime": mime,
+        "created_at": _now(),
+        **{k: v for k, v in meta.items() if k != "data"},
+    }
+
+    collection = _images_collection()
+    if collection is not None:
+        try:
+            # pyrefly: ignore [missing-import]
+            from bson import Binary
+
+            stored = dict(doc)
+            stored["data"] = Binary(data)
+            if IMAGE_RETENTION_DAYS > 0:
+                stored["expires_at"] = datetime.now(timezone.utc) + timedelta(days=IMAGE_RETENTION_DAYS)
+            collection.insert_one(stored)
+            return image_id
+        except Exception as err:
+            print("[MongoDB] save_image error:", err)
+
+    with _lock:
+        _memory_images[image_id] = {**doc, "data": data}
+        # Oldest out first; dicts keep insertion order.
+        while len(_memory_images) > MAX_MEMORY_IMAGES:
+            _memory_images.pop(next(iter(_memory_images)))
+    return image_id
+
+
+def get_image(image_id: str) -> Optional[Dict[str, Any]]:
+    """The bytes and content type for one image, or None if it is gone."""
+    collection = _images_collection()
+    if collection is not None:
+        try:
+            found = collection.find_one({"id": image_id})
+            if found:
+                return {"data": bytes(found["data"]), "mime": found.get("mime", "image/png")}
+        except Exception as err:
+            print("[MongoDB] get_image error:", err)
+
+    with _lock:
+        found = _memory_images.get(image_id)
+        return {"data": found["data"], "mime": found.get("mime", "image/png")} if found else None
+
+
+def list_images(user_email: Optional[str] = None, limit: int = 24) -> List[Dict[str, Any]]:
+    """Recent generations for one account, newest first, without the bytes."""
+    owner = _owner(user_email)
+    if owner is None:
+        return []
+
+    collection = _images_collection()
+    if collection is not None:
+        try:
+            cursor = (
+                collection.find({"user_email": owner}, {"_id": 0, "data": 0, "expires_at": 0})
+                .sort("created_at", -1)
+                .limit(limit)
+            )
+            return list(cursor)
+        except Exception as err:
+            print("[MongoDB] list_images error:", err)
+
+    with _lock:
+        rows = [
+            {k: v for k, v in doc.items() if k != "data"}
+            for doc in _memory_images.values()
+            if doc.get("user_email") == owner
+        ]
+    return list(reversed(rows))[:limit]

@@ -12,8 +12,10 @@
     "dev:api": "cd server && ./.venv/bin/uvicorn main:app --reload --port 8000"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "gsap": "^3.15.0",
     "lucide-react": "^1.33.0",
     "mongodb": "^7.5.0",
     "next": "16.3.1",

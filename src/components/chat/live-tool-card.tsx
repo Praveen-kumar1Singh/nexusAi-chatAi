@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { GeneratedImageCard, parseGeneratedImage } from "@/components/chat/generated-image";
 import type { ToolEvent } from "@/lib/types";
 
 /** What each tool is doing, shown while it runs. */
 const RUNNING_VERB: Record<string, string> = {
   web_search: "Searching the web",
   ask_options: "Preparing options",
+  generate_image: "Generating the image",
 };
 
 /** Cycles "" → "." → ".." → "..." so the label reads as live activity. */
@@ -50,6 +52,9 @@ function errorText(result: string): string {
  * disappears and the answer speaks for itself. Failures stay visible, otherwise
  * the assistant would appear to answer normally after a step silently broke.
  * The full arguments and results of every call are on the Activity page.
+ *
+ * generate_image is the exception to "succeeds, then disappears": its result IS
+ * the answer, so the picture is rendered here and stays with the stored turn.
  */
 export function LiveToolCard({ tool }: { tool: ToolEvent }) {
   const running = tool.result === undefined;
@@ -73,6 +78,12 @@ export function LiveToolCard({ tool }: { tool: ToolEvent }) {
         <span>{errorText(tool.result!)}</span>
       </p>
     );
+  }
+
+  // The picture is the result -- everything else only reports on itself.
+  const image = parseGeneratedImage(tool.result);
+  if (image) {
+    return <GeneratedImageCard image={image} className="max-w-md" />;
   }
 
   // Succeeded -- nothing to show; the answer follows.

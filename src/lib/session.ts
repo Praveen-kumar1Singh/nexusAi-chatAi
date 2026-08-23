@@ -25,7 +25,11 @@ export type SessionUser = {
   planActivatedAt?: string;
 };
 
-/** Raised when the session store itself is unavailable, as opposed to absent. */
+/**
+ * Raised when the session store itself is unavailable, as opposed to absent.
+ * The original failure is kept as `cause` so callers can tell a misconfigured
+ * deployment from an unreachable one -- see `dbErrorMessage`.
+ */
 export class SessionStoreDown extends Error {}
 
 let indexes: Promise<void> | null = null;
@@ -48,7 +52,7 @@ async function store(): Promise<Db> {
   try {
     return await getDb();
   } catch (err) {
-    throw new SessionStoreDown(String(err));
+    throw new SessionStoreDown(String(err), { cause: err });
   }
 }
 

@@ -20,6 +20,17 @@ export function MessageMarkdown({ children }: { children: string }) {
           a: (props) => (
             <a className="text-primary underline font-medium" target="_blank" rel="noreferrer" {...props} />
           ),
+          // The model is told not to paste image URLs -- generated pictures are
+          // rendered from the tool result instead -- but a linked image in a
+          // search result would otherwise blow out the column width.
+          img: (props) => (
+            // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+            <img
+              className="my-1 max-h-[420px] w-auto max-w-full rounded-xl border border-border"
+              loading="lazy"
+              {...props}
+            />
+          ),
           code: (props) => (
             <code
               className="rounded bg-elevated px-1 py-0.5 font-mono text-[0.85em] text-foreground break-words"

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { DB_UNREACHABLE } from "@/lib/mongodb";
+import { dbErrorMessage } from "@/lib/mongodb";
 import { SessionStoreDown, currentEmail } from "@/lib/session";
 
 /**
@@ -17,9 +17,10 @@ export async function sessionEmailOr503(): Promise<{
     return { email: await currentEmail() };
   } catch (err) {
     if (err instanceof SessionStoreDown) {
+      console.error("[Session] Store unavailable:", err.cause ?? err);
       return {
         email: null,
-        response: NextResponse.json({ error: DB_UNREACHABLE }, { status: 503 }),
+        response: NextResponse.json({ error: dbErrorMessage(err) }, { status: 503 }),
       };
     }
     throw err;

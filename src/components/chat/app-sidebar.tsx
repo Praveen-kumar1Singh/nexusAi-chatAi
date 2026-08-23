@@ -8,6 +8,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Hexagon,
+  Image as ImageIcon,
   MessageSquare,
   Plus,
   Trash2,
@@ -32,10 +33,11 @@ function groupOf(iso: string): string {
 
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 Days", "Older"];
 
-/** The two ways into the agent. Both share this sidebar and the same history. */
+/** Main navigation links in the sidebar. */
 const SECTIONS = [
   { href: "/", label: "Chat", icon: MessageSquare },
   { href: "/voice", label: "AI Voice Chat", icon: AudioLines },
+  { href: "/tools/image", label: "Image Generator", icon: ImageIcon },
 ] as const;
 
 function cleanTitle(rawTitle: string): string {
@@ -90,12 +92,17 @@ export function AppSidebar({
   onItemClick?: () => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>(getStoredConversations);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const onChatPage = pathname === "/";
-  // Guests get a single, unsaved chat window: no thread list, and no way to
-  // start a second one. Signing in unlocks both.
+
+  useEffect(() => {
+    setMounted(true);
+    setConversations(getStoredConversations());
+  }, []);
+
   const { user, loading: sessionLoading } = useSession();
   const signedIn = Boolean(user);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -104,8 +111,6 @@ export function AppSidebar({
   function selectThread(id: string | null) {
     setActiveId(id);
     onItemClick?.();
-    // The chat page listens in-place; anywhere else, route to it and let the
-    // `?c=` parameter open the thread once it mounts.
     if (onChatPage) {
       window.dispatchEvent(new CustomEvent(SELECT_CONVERSATION, { detail: { id } }));
     } else {
@@ -123,22 +128,17 @@ export function AppSidebar({
             setStoredConversations(data.conversations);
           }
         })
-        // Agent offline -- leave the list empty rather than breaking the shell.
         .catch(() => {}),
     [],
   );
 
   useEffect(() => {
-    // Nothing to fetch for a guest, and nothing stored to fetch it from.
     if (!signedIn) return;
     load();
-    // useChat fires this after each turn so a new thread shows up immediately.
     window.addEventListener(CONVERSATIONS_CHANGED, load);
     return () => window.removeEventListener(CONVERSATIONS_CHANGED, load);
   }, [load, signedIn]);
 
-  // A different account means a different set of threads; drop the previous
-  // one's titles rather than leaving them in the panel.
   useEffect(() => {
     function onAuthChange() {
       setActiveId(null);
@@ -181,29 +181,33 @@ export function AppSidebar({
             variant="ghost"
             size="icon"
             onClick={onToggle}
-            className="mx-auto size-8 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/80 cursor-pointer rounded-lg transition-colors"
             aria-label="Expand sidebar"
+            className="mx-auto size-8 text-sidebar-foreground hover:bg-sidebar-accent"
             title="Expand sidebar"
           >
-            <ChevronsRight className="size-4 text-primary" />
+            <ChevronsRight className="size-4" />
           </Button>
         ) : (
           <>
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-primary/15 text-primary ring-1 ring-primary/30">
-                <Hexagon className="size-4" />
+              <div className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground font-bold text-xs shrink-0">
+                <Hexagon className="size-4 fill-current" />
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-display text-sm font-semibold">Nexus AI</p>
-                <p className="truncate text-[11px] text-muted-foreground">Environment</p>
+              <div className="flex flex-col min-w-0">
+                <span className="font-display font-bold text-sm tracking-tight text-sidebar-foreground truncate">
+                  Nexus AI
+                </span>
+                <span className="text-[10px] text-muted-foreground/70 font-mono tracking-wider uppercase">
+                  Environment
+                </span>
               </div>
             </div>
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
               onClick={onToggle}
               aria-label="Collapse sidebar"
+              className="size-7 text-sidebar-foreground hover:bg-sidebar-accent shrink-0"
               title="Collapse sidebar"
             >
               <ChevronsLeft className="size-4" />
@@ -237,7 +241,7 @@ export function AppSidebar({
         })}
       </nav>
 
-      {!sessionLoading && signedIn && (
+      {mounted && !sessionLoading && signedIn && (
         <div className="px-3 pb-3">
           <Button
             variant="secondary"
@@ -257,7 +261,7 @@ export function AppSidebar({
         <Separator className="bg-sidebar-border" />
       </div>
 
-      {!collapsed && !sessionLoading && !signedIn && (
+      {mounted && !collapsed && !sessionLoading && !signedIn && (
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
           <div className="rounded-xl border border-border bg-surface/60 p-2.5 space-y-1">
             <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-foreground">
@@ -288,7 +292,7 @@ export function AppSidebar({
         </div>
       )}
 
-      {!collapsed && !sessionLoading && signedIn && (
+      {mounted && !collapsed && !sessionLoading && signedIn && (
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-2">
           {conversations.length === 0 ? (
             <p className="px-2.5 py-2 text-[12px] text-muted-foreground/70">

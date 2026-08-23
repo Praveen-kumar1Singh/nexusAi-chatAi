@@ -49,6 +49,41 @@ export type ToolInfo = {
   routable?: boolean;
 };
 
+/** One picture the image tool produced, as the agent describes it. */
+export type GeneratedImage = {
+  /** Path on this origin -- /api/images/<id>. Never the provider's own link. */
+  url: string;
+  prompt: string;
+  width: number;
+  height: number;
+  size: string;
+  style?: string;
+  seed?: number;
+  provider: string;
+  model: string;
+  created_at?: string;
+};
+
+export type ImageQuota = {
+  plan: "free" | "paid" | "none";
+  maxImages: number;
+  usedImages: number;
+  remainingImages: number;
+  canGenerate: boolean;
+};
+
+/** Which image model the agent will call, plus this account's recent work and quota. */
+export type ImageToolStatus = {
+  available: boolean;
+  provider: string;
+  model: string;
+  key_loaded: boolean;
+  sizes: string[];
+  styles: string[];
+  recent?: GeneratedImage[];
+  quota?: ImageQuota;
+};
+
 /** Fired after a turn creates or updates a conversation, so the sidebar refetches. */
 export const CONVERSATIONS_CHANGED = "conversations:changed";
 export const SELECT_CONVERSATION = "conversations:select";

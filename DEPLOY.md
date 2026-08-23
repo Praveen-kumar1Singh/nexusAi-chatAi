@@ -61,6 +61,21 @@ Import the same repo; the defaults for a Next.js project are correct and
 | `AGENT_URL` | `https://<service>.onrender.com` -- no trailing slash |
 | `AGENT_TOKEN` | the same value as on Render |
 | `MONGODB_URI`, `MONGODB_DB` | Atlas -- Next.js reads it directly for auth, sessions and credits |
+
+**`MONGODB_DB` is required on Vercel, not optional.** Without it `getDb` refuses
+rather than falling back to `test`, and every signed-in request answers 503 --
+which shows up in the chat window as a notice about the database, from a
+deployment where Atlas itself is perfectly healthy.
+
+Confirm the deploy the same way you confirm Render's:
+
+    curl https://<app>.vercel.app/api/health
+
+`"connected": true` and the expected `"database"` mean auth, sessions and
+credits are wired up. Otherwise `reason` says which half is wrong --
+`misconfigured` (a variable is missing here; nothing to do in Atlas) or
+`unreachable` (section 3 below). No secrets are returned; the URI shows only as
+its host.
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID` | payments |
 
 ## 3. MongoDB Atlas
