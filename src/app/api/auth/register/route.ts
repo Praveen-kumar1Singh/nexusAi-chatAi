@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { DB_UNREACHABLE, getDb } from "@/lib/mongodb";
 import { startSession } from "@/lib/session";
 
+/** What the Free Starter plan is worth, matching PlanActivationModal. */
+const FREE_PLAN_CREDITS = 50;
+
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   if (!body || !body.email || !body.password_hash) {
@@ -35,10 +38,20 @@ export async function POST(req: Request) {
       );
     }
 
+    // The Free Starter plan is granted here rather than waiting for someone to
+    // find PlanActivationModal, which is only reachable from the avatar menu.
+    // Without it `plan` was undefined, /api/chat read that as "none" and
+    // answered 402 PLAN_REQUIRED on every message -- so the turn never reached
+    // the agent, and no conversation was ever written. Upgrading to Pro still
+    // goes through the modal.
+    const createdAt = new Date().toISOString();
     await users.insertOne({
       email: normalizedEmail,
       password_hash: passwordHash,
-      createdAt: new Date().toISOString(),
+      createdAt,
+      plan: "free",
+      credits: FREE_PLAN_CREDITS,
+      planActivatedAt: createdAt,
     });
 
     await startSession(normalizedEmail);

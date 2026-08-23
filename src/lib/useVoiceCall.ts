@@ -89,16 +89,6 @@ const SILENCE_MS = 1200;
 /** Recognition stops itself periodically; this is how soon we reopen the mic. */
 const REOPEN_MS = 250;
 
-/**
- * Identifies the reply currently on screen, so it is spoken once. Length is
- * enough to tell a finished turn from the same turn mid-stream.
- */
-function replyKey(messages: Message[]): string | null {
-  const last = messages[messages.length - 1];
-  if (!last || last.role !== "assistant" || !last.content || last.error) return null;
-  return `${messages.length}:${last.content.length}`;
-}
-
 export function useVoiceCall(chat: {
   messages: Message[];
   isLoading: boolean;
@@ -112,7 +102,7 @@ export function useVoiceCall(chat: {
   // useSpeech and useVoiceInput return a fresh object every render, but the
   // callbacks inside are stable. Destructuring is what keeps the transitions
   // below stable too, rather than rebuilding on every render.
-  const { speak, stop: stopSpeech, speaking } = speech;
+  const { speakLive, stop: stopSpeech, speaking } = speech;
 
   /**
    * The phase is derived, never stored. A call is thinking when the stream is
@@ -122,10 +112,10 @@ export function useVoiceCall(chat: {
    */
   const phase: CallPhase = !active
     ? "idle"
-    : chat.isLoading
-      ? "thinking"
-      : speaking
-        ? "speaking"
+    : speaking
+      ? "speaking"
+      : chat.isLoading
+        ? "thinking"
         : "listening";
 
   // Read from callbacks that fire outside React's render cycle.
@@ -246,15 +236,23 @@ export function useVoiceCall(chat: {
     if (listening) stopMic();
   }, [phase, listening, micFatal, startMic, stopMic]);
 
-  /** Read each finished reply out loud, once. */
-  const spoken = useRef<string | null>(null);
+  /**
+   * Read each reply out loud as it is written.
+   *
+   * Waiting for the finished reply put the whole of the model's writing time
+   * into a silence the caller sat through, on every single turn. `speakLive`
+   * takes the answer as it grows and starts on the first complete sentence, so
+   * the rest is composed while audio is already playing.
+   */
+  const skipIndex = useRef<number | null>(null);
   useEffect(() => {
-    if (!active || chat.isLoading) return;
-    const key = replyKey(chat.messages);
-    if (!key || spoken.current === key) return;
-    spoken.current = key;
-    speak(chat.messages[chat.messages.length - 1].content);
-  }, [active, chat.isLoading, chat.messages, speak]);
+    if (!active) return;
+    const index = chat.messages.length - 1;
+    const last = chat.messages[index];
+    if (!last || last.role !== "assistant" || !last.content || last.error) return;
+    if (skipIndex.current === index) return; // already on screen when the call joined
+    speakLive(String(index), last.content, !chat.isLoading);
+  }, [active, chat.isLoading, chat.messages, speakLive]);
 
   const end = useCallback(() => {
     setActive(false);
@@ -269,7 +267,7 @@ export function useVoiceCall(chat: {
     pending.current = "";
     setHeard("");
     // Joining a thread that already has a reply on screen should not replay it.
-    spoken.current = replyKey(chat.messages);
+    skipIndex.current = chat.messages.length - 1;
     setActive(true);
   }, [chat.messages]);
 

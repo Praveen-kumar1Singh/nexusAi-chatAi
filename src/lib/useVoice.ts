@@ -250,7 +250,7 @@ function splitLong(text: string, limit: number): string[] {
  * so it alone decides the turn's time-to-first-audio. Later chunks are larger
  * because playback is running by then and there is time in hand.
  */
-export function speechChunks(text: string, first = 90, rest = 200): string[] {
+export function speechChunks(text: string, first = 70, rest = 200): string[] {
   // Keep the terminator with its sentence; the trailing group catches text
   // that never ends in punctuation at all.
   const sentences = text.match(/[^.!?]+(?:[.!?]+|$)/g) ?? [text];
@@ -279,6 +279,44 @@ export function speechChunks(text: string, first = 90, rest = 200): string[] {
 
   return chunks.filter(Boolean);
 }
+
+/**
+ * A sentence end, in both scripts the call supports.
+ *
+ * The whitespace has to be there. A bare terminator matches the dot in "3.14"
+ * and the one in "Ms. Rao", and cutting a clip there says "Pi is about three."
+ * It also makes the match monotonic while a reply streams: once a terminator
+ * has a space after it, every longer prefix still has it, so text is only ever
+ * released, never taken back.
+ */
+const SENTENCE_END = /[.!?\u0964](?=\s)/g;
+
+/**
+ * How much of a still-arriving reply can be spoken now.
+ *
+ * Only whole sentences: the tail of a stream is still growing, and synthesising
+ * half a clause makes the pause land in the wrong place. Once `done`, the
+ * remainder goes out whatever it ends with.
+ */
+export function readyToSpeak(markdown: string, done: boolean): string {
+  let source = markdown;
+
+  // An open code fence is still being written, and `speakable` renders it very
+  // differently once it closes -- so hold everything from the fence onward.
+  if (!done && (source.split("```").length - 1) % 2 === 1) {
+    source = source.slice(0, source.lastIndexOf("```"));
+  }
+
+  const prose = speakable(source);
+  if (done) return prose;
+
+  let end = -1;
+  for (const match of prose.matchAll(SENTENCE_END)) end = match.index;
+  return end < 0 ? "" : prose.slice(0, end + 1);
+}
+
+/** How long to wait for more text before checking the queue again. */
+const STREAM_POLL_MS = 60;
 
 /** One chunk of audio, as an object URL ready to play. */
 async function fetchClip(text: string, signal: AbortSignal): Promise<string> {
@@ -376,6 +414,23 @@ function unreachable(status?: number): SpeechStatus {
   };
 }
 
+/** A reply being synthesised and played while it is still being written. */
+type LiveRun = {
+  /** Identifies the reply, so a new turn replaces this run instead of extending it. */
+  key: string;
+  controller: AbortController;
+  /** Chunks waiting to be synthesised, in order. */
+  queue: string[];
+  /** How much of the prose has already been turned into queued chunks. */
+  taken: number;
+  /** No more text is coming. */
+  ended: boolean;
+  /** The drain loop is running; `push` only has to start it once. */
+  draining: boolean;
+  /** Object URLs to revoke when the run finishes. */
+  urls: string[];
+};
+
 export type Speech = ReturnType<typeof useSpeech>;
 
 /**
@@ -394,6 +449,14 @@ export function useSpeech() {
   const audio = useRef<HTMLAudioElement | null>(null);
   /** Cancels the in-flight synthesis and playback of the current reply. */
   const run = useRef<AbortController | null>(null);
+  /** The reply being spoken as it streams in. See `speakLive`. */
+  const live = useRef<LiveRun | null>(null);
+  /**
+   * The run key `stop()` last cancelled. A reply that is still streaming keeps
+   * arriving after the user interrupts it, and without this the next token
+   * would start it playing again.
+   */
+  const cancelled = useRef<string | null>(null);
 
   // Is speech actually available? Answered once. `status` stays null only while
   // the question is still open -- a failure resolves to an unavailable status
@@ -413,6 +476,11 @@ export function useSpeech() {
   }, []);
 
   const stop = useCallback(() => {
+    if (live.current) {
+      cancelled.current = live.current.key;
+      live.current.controller.abort();
+      live.current = null;
+    }
     run.current?.abort();
     run.current = null;
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -492,6 +560,110 @@ export function useSpeech() {
     [status?.installed, stop],
   );
 
+  /**
+   * Speak a reply while it is still streaming.
+   *
+   * `speak` above waits for the whole answer before making its first request,
+   * which is right for the text chat -- the reply is already on screen. In a
+   * hands-free call nothing is on screen, so that wait is dead air on every
+   * turn. This takes the reply as it grows: each complete sentence is queued
+   * the moment it lands, and playback starts on the first one while the model
+   * is still writing the rest.
+   *
+   * Call it repeatedly with the same `key` and the full text so far; pass
+   * `done` on the last call. A different `key` cancels the previous reply.
+   *
+   * Only the KittenTTS path streams. The browser fallback takes one utterance
+   * and paces itself, so it is left to `speak`.
+   */
+  const speakLive = useCallback(
+    (key: string, markdown: string, done: boolean) => {
+      if (!status?.installed) {
+        // No server speech: fall back to one utterance, once the reply is in.
+        if (done) void speak(markdown);
+        return;
+      }
+      if (cancelled.current === key) return; // interrupted; do not resurrect it
+
+      if (live.current && live.current.key !== key) stop();
+
+      if (!live.current) {
+        if (!readyToSpeak(markdown, done)) return; // nothing whole to say yet
+        cancelled.current = null;
+        const controller = new AbortController();
+        live.current = {
+          key,
+          controller,
+          queue: [],
+          taken: 0,
+          ended: false,
+          draining: false,
+          urls: [],
+        };
+        setError(null);
+        setSpeaking(true);
+      }
+
+      const current = live.current;
+      const prose = readyToSpeak(markdown, done);
+      const fresh = prose.slice(current.taken).trim();
+
+      if (fresh) {
+        // Only the very first clip is waited on in silence, so only it is kept
+        // short; by the time the rest is needed, audio is already playing.
+        const opening = current.taken === 0;
+        current.queue.push(...speechChunks(fresh, opening ? undefined : 200));
+        current.taken = prose.length;
+      }
+      if (done) current.ended = true;
+
+      if (current.draining) return;
+      current.draining = true;
+
+      void (async () => {
+        const { signal } = current.controller;
+        /** The next chunk's synthesis, started before the current one plays. */
+        let ahead: Promise<string> | null = null;
+        try {
+          while (!signal.aborted) {
+            if (current.queue.length === 0) {
+              if (current.ended) break;
+              await new Promise((r) => setTimeout(r, STREAM_POLL_MS));
+              continue;
+            }
+
+            const chunk = current.queue.shift() as string;
+            const url = await (ahead ?? fetchClip(chunk, signal));
+            ahead = null;
+            if (signal.aborted) return;
+            current.urls.push(url);
+
+            // Queue the next synthesis before playing this clip, so the gap
+            // between clips is playback time rather than waiting time.
+            if (current.queue.length > 0) {
+              ahead = fetchClip(current.queue[0], signal);
+              ahead.catch(() => {});
+            }
+
+            await playClip(url, signal, (el) => {
+              audio.current = el;
+            });
+          }
+        } catch (err) {
+          if (signal.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
+          setError(err instanceof Error ? err.message : "Speech failed.");
+        } finally {
+          for (const url of current.urls) URL.revokeObjectURL(url);
+          if (live.current === current) {
+            live.current = null;
+            setSpeaking(false);
+          }
+        }
+      })();
+    },
+    [speak, status?.installed, stop],
+  );
+
   // Turning the speaker off silences whatever is mid-sentence.
   const toggle = useCallback(() => {
     setEnabled((on) => {
@@ -517,6 +689,8 @@ export function useSpeech() {
     speaking,
     error,
     speak,
+    /** Speak a reply as it streams in, rather than waiting for all of it. */
+    speakLive,
     stop,
     toggle,
   };

@@ -10,6 +10,7 @@ data produced by the running system; there are no fixtures.
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -36,6 +37,17 @@ from agent import stream_chat  # noqa: E402  (needs env loaded first)
 from tools import registry  # noqa: E402
 
 app = FastAPI(title="Nexus AI agent", version="1.0.0")
+
+
+# Loading the speech models takes about five seconds each, and lazily that cost
+# lands on the first person to speak. Doing it here spends it before anyone is
+# waiting. On a thread because it must not hold up the port opening, and behind
+# a switch because a memory-tight host is better off paying it per request.
+if os.environ.get("TTS_PREWARM", "on").strip().lower() not in {"off", "false", "0", "no"}:
+
+    @app.on_event("startup")
+    def _warm_speech() -> None:
+        threading.Thread(target=tts.warm, name="tts-warm", daemon=True).start()
 
 
 # Shared secret between the Next.js proxy and this service.

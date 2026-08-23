@@ -27,6 +27,31 @@ MAX_TOOL_ROUNDS = 5
 # so it runs at most once per turn. Everything else is deduplicated by arguments.
 ONCE_PER_TURN = {"web_search", "ask_options"}
 
+# How hard gpt-oss thinks before it answers. Groq's default is "medium", which
+# costs a second or two of silence per round -- unnoticeable in a written chat,
+# but the dominant cost of a spoken turn, where nothing is heard until the whole
+# reply is in. A spoken answer is two or three sentences, so the extra thinking
+# buys very little; measured on the same prompt, "low" answered in 0.66s where
+# the default took 2.18s and sometimes called another tool instead of replying.
+VOICE_REASONING_EFFORT = "low"
+
+# Sent once, when a round has asked only for work that was already done. The
+# alternative -- refusing the call and letting it try again -- is what used to
+# spend every remaining round rewording the same query.
+ANSWER_NOW = (
+    "You already have everything you are going to be given for this message. "
+    "Answer the user now, in plain sentences, using only what is above. Do not "
+    "call any tool. If what you have is not enough, say so and say what is missing."
+)
+
+# Said in the model's place when it will not stop calling tools long enough to
+# write anything. Better than "Stopped after too many tool calls", which reads
+# as a crash and tells the person nothing they can act on.
+FELL_SHORT = (
+    "I could not pull that together from what I found. Could you try asking it a "
+    "different way?"
+)
+
 SYSTEM_PROMPT = """You are an assistant wired into a set of tools. Who you are and
 what you say about yourself is set by the Identity section below.
 
@@ -120,6 +145,11 @@ def stream_chat(
     # Guards against the model retrying the same work within one turn.
     already_run: Dict[str, str] = {}
     call_counts: Dict[str, int] = {}
+    # Set when a round asked only for work that had already been done, which
+    # means more rounds cannot produce anything new. The next one is made to
+    # answer instead. See `extra_args` below.
+    force_answer = False
+    nudged = False  # ANSWER_NOW is worth saying once, not once per round
     # policy.apply is a temporary, removable restriction -- see policy.py.
     messages: List[Dict[str, Any]] = [
         {"role": "system", "content": policy.apply(SYSTEM_PROMPT, voice)}
@@ -166,22 +196,44 @@ def stream_chat(
                     if alt_m not in models_to_try:
                         models_to_try.append(alt_m)
 
+            # The tools go on every request, including the ones that are meant to
+            # stop calling them. Neither `tool_choice="none"` nor leaving `tools`
+            # out works on gpt-oss: it emits the call regardless and Groq then
+            # fails the whole request with "Tool choice is none, but model called
+            # a tool". Saying so in a message is what actually lands -- and the
+            # round after it is terminal either way, see `force_answer` below.
+            extra_args: Dict[str, Any] = {
+                "tools": tool_schemas(),
+                "tool_choice": "auto",
+            }
+
+            # reasoning_effort is a Groq/gpt-oss parameter; sending it to another
+            # provider would 400 the request.
+            if voice and provider.name == "groq":
+                extra_args["reasoning_effort"] = VOICE_REASONING_EFFORT
+
+            if force_answer and not nudged:
+                nudged = True
+                messages.append({"role": "system", "content": ANSWER_NOW})
+
             last_exc = None
             rot_keys = llm.rotating_keys()
             attempts_per_model = max(len(rot_keys) * 2, 4)
 
             for try_model in models_to_try:
                 model_unavailable = False
+                # Rate limits are counted separately from other failures: they
+                # are worth one try per key and no more. See below.
+                rate_limited = 0
                 for _attempt in range(attempts_per_model):
                     try:
                         curr_client, curr_provider = llm.client()
                         completion = curr_client.chat.completions.create(
                             model=try_model,
                             messages=messages,
-                            tools=tool_schemas(),
-                            tool_choice="auto",
                             temperature=0.6,
                             stream=True,
+                            **extra_args,
                         )
                         break
                     except Exception as exc:
@@ -202,6 +254,20 @@ def stream_chat(
                                 flush=True,
                             )
                             break
+
+                        # A 429 is not worth hammering. Each key gets one try,
+                        # in case they belong to different organisations -- but
+                        # Groq counts tokens per organisation, so a set of keys
+                        # cut from one account shares a single budget and the
+                        # rest of the attempts only add delay to an error the
+                        # user is going to see anyway. This was costing 10-25s
+                        # of silence per turn once the daily limit was close.
+                        if "rate_limit" in exc_str or "429" in exc_str:
+                            rate_limited += 1
+                            if rate_limited >= len(rot_keys):
+                                break
+                            continue
+
                         time.sleep(0.2)
                         continue
 
@@ -218,23 +284,44 @@ def stream_chat(
             # lands in the first fragment, arguments accumulate across many.
             pending: Dict[int, Dict[str, str]] = {}
 
-            for chunk in completion:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
+            # A stream can fail after it has started -- gpt-oss occasionally emits
+            # a tool name with its channel marker still attached
+            # ("web_search<|channel|>commentary") and Groq rejects the call
+            # mid-stream. That is raised here, past the retry loop above, and
+            # used to kill the whole turn. Whatever arrived before the break is
+            # kept, and the round is retried with tools switched off.
+            try:
+                for chunk in completion:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
 
-                if getattr(delta, "content", None):
-                    text += delta.content
-                    yield _event(type="text", value=delta.content)
+                    if getattr(delta, "content", None):
+                        text += delta.content
+                        yield _event(type="text", value=delta.content)
 
-                for call in getattr(delta, "tool_calls", None) or []:
-                    slot = pending.setdefault(call.index, {"id": "", "name": "", "args": ""})
-                    if call.id:
-                        slot["id"] = call.id
-                    if call.function and call.function.name:
-                        slot["name"] = call.function.name
-                    if call.function and call.function.arguments:
-                        slot["args"] += call.function.arguments
+                    for call in getattr(delta, "tool_calls", None) or []:
+                        slot = pending.setdefault(call.index, {"id": "", "name": "", "args": ""})
+                        if call.id:
+                            slot["id"] = call.id
+                        if call.function and call.function.name:
+                            slot["name"] = call.function.name
+                        if call.function and call.function.arguments:
+                            slot["args"] += call.function.arguments
+            except Exception as exc:
+                print(f"[agent] Stream broke mid-round: {exc}", flush=True)
+                if text:
+                    # Enough of an answer already arrived to stand on its own.
+                    pending.clear()
+                else:
+                    # Nothing usable. Drop the half-built tool calls and let the
+                    # next round answer from what it already has.
+                    pending.clear()
+                    if not force_answer:
+                        force_answer = True
+                        round_span.end(error=str(exc))
+                        continue
+                    raise
 
             answer += text
             calls = [pending[i] for i in sorted(pending)]
@@ -262,6 +349,19 @@ def stream_chat(
                 yield _event(type="done")
                 return
 
+            if force_answer:
+                # It was told to answer and asked for a tool anyway. Repeating
+                # that is exactly the loop this guard exists to stop, so the turn
+                # ends here on whatever it did manage to write.
+                if not answer.strip():
+                    answer = FELL_SHORT
+                    yield _event(type="text", value=answer)
+                if conversation_id:
+                    store.append_message(conversation_id, "assistant", answer, used_tools)
+                turn.end({"output": answer})
+                yield _event(type="done")
+                return
+
             messages.append(
                 {
                     "role": "assistant",
@@ -276,6 +376,11 @@ def stream_chat(
                     ],
                 }
             )
+
+            # A round that only replays cached results or reads back refusals has
+            # learned nothing, and letting it run again just spends another
+            # round arriving at the same place.
+            did_work = False
 
             for call in calls:
                 name, args = call["name"], call["args"]
@@ -327,6 +432,9 @@ def stream_chat(
                 messages.append(
                     {"role": "tool", "tool_call_id": call["id"], "content": result}
                 )
+                did_work = True
+
+            force_answer = not did_work
 
         turn.end(error="Stopped after too many tool calls.")
         yield _event(type="error", value="Stopped after too many tool calls.")

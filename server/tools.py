@@ -15,11 +15,21 @@ import duckduckgo
 # implementations
 # --------------------------------------------------------------------------
 
-# One result per search -- raise this to widen the tool again.
-MAX_WEB_RESULTS = 1
+# How many results one search returns.
+#
+# This was 1, and one result is not enough to answer with. The model would read
+# the single hit, decide it had not found the answer, and search again -- but
+# ONCE_PER_TURN then handed it a refusal instead of results, which it did not
+# accept either. It spent every remaining round rewording the query and the turn
+# ended on "Stopped after too many tool calls" 15-40s later, in silence, because
+# a capped call emits no event for the UI to show.
+#
+# Five results cost the same one HTTP round trip (~0.9s) and let the first
+# search actually answer the question.
+MAX_WEB_RESULTS = 5
 
 
-def web_search(query: str, max_results: int = 1) -> Dict[str, Any]:
+def web_search(query: str, max_results: int = MAX_WEB_RESULTS) -> Dict[str, Any]:
     """Search the public web through DuckDuckGo."""
     query = str(query or "").strip()
     if not query:
@@ -117,12 +127,14 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "function": {
                 "name": "web_search",
                 "description": (
-                    "Search the public web with DuckDuckGo and return the single best "
-                    "result. Use this for anything you do not reliably know: current "
+                    "Search the public web with DuckDuckGo and return the top "
+                    "results. Use this for anything you do not reliably know: current "
                     "events, public facts, documentation, libraries, APIs, error "
                     "messages, prices, people or companies, and anything after your "
-                    "training cutoff. Make the query specific, because you only get "
-                    "one attempt per message. Always cite the URL you used."
+                    "training cutoff. You get exactly one search per message, so make "
+                    "the query specific and then answer from what comes back -- "
+                    "rewording it and searching again is refused. Always cite the URL "
+                    "you used."
                 ),
                 "parameters": {
                     "type": "object",
