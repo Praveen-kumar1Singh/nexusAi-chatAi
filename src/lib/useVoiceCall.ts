@@ -95,8 +95,6 @@ export function useVoiceCall(chat: {
   send: (text: string, opts?: { voice?: boolean }) => void;
 }) {
   const [active, setActive] = useState(false);
-  /** What has been heard so far this turn, shown live under the orb. */
-  const [heard, setHeard] = useState("");
 
   const speech = useSpeech();
   // useSpeech and useVoiceInput return a fresh object every render, but the
@@ -120,11 +118,9 @@ export function useVoiceCall(chat: {
 
   // Read from callbacks that fire outside React's render cycle.
   const activeRef = useRef(active);
-  const phaseRef = useRef<CallPhase>(phase);
   useEffect(() => {
     activeRef.current = active;
-    phaseRef.current = phase;
-  }, [active, phase]);
+  }, [active]);
 
   // Seeded from the browser's own preferences, so a Hindi-reading visitor is
   // usually understood on the very first sentence rather than the second.
@@ -151,48 +147,30 @@ export function useVoiceCall(chat: {
     return preferred;
   }, [chat.messages, preferred]);
 
-  const pending = useRef("");
-  const silence = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearSilence = useCallback(() => {
-    if (silence.current) {
-      clearTimeout(silence.current);
-      silence.current = null;
-    }
-  }, []);
-
   // The flush timer and `send` reference each other, so the callback lives in a
   // ref and the timer only ever reads the current one.
   const flushRef = useRef<() => void>(() => {});
 
-  const voice = useVoiceInput({
-    lang,
-    onChunk: (chunk, isFinal) => {
-      if (!activeRef.current) return;
-      const trimmed = chunk.trim();
-      if (!trimmed) return;
+  const voice = useVoiceInput({ lang });
+  const {
+    start: startMic,
+    stop: stopMic,
+    reset: resetHeard,
+    listening,
+    error: micError,
+    transcript: heard,
+  } = voice;
 
-      // The mic is shut for the whole thinking-and-speaking stretch, so anything
-      // arriving here is the user -- never the agent's own reply coming back in
-      // through the speakers.
-      if (phaseRef.current !== "listening") return;
-
-      // Hang up on request: "end call", "cut call", "call band karo", "bye".
-      if (isExitCommand(trimmed) || isExitCommand(pending.current + " " + trimmed)) {
-        endRef.current();
-        return;
-      }
-
-      if (isFinal) {
-        pending.current = joinSpoken(pending.current, trimmed);
-        setHeard(pending.current);
-        clearSilence();
-        silence.current = setTimeout(() => flushRef.current(), SILENCE_MS);
-      }
-    },
-    onFinal: () => {},
-  });
-
-  const { start: startMic, stop: stopMic, listening, error: micError } = voice;
+  /**
+   * The whole of this turn: what the recogniser has settled on, plus the words
+   * it is still deciding. Both matter -- a turn is flushed on a pause, and the
+   * pause can arrive before the last phrase has been promoted to settled.
+   */
+  const spoken = joinSpoken(heard, voice.interim);
+  const spokenRef = useRef(spoken);
+  useEffect(() => {
+    spokenRef.current = spoken;
+  }, [spoken]);
 
   /**
    * `no-speech` is simply what the recogniser reports for a quiet stretch, and a
@@ -202,21 +180,56 @@ export function useVoiceCall(chat: {
    */
   const micFatal = isFatalInputError(voice.errorCode);
 
+  const end = useCallback(() => {
+    setActive(false);
+    resetHeard();
+    stopMic();
+    stopSpeech();
+  }, [resetHeard, stopMic, stopSpeech]);
+
+  // Held in a ref so the hang-up effects never depend on `end`'s identity --
+  // leaving a call running is not something a re-render should be able to undo.
+  const endRef = useRef(end);
+  useEffect(() => {
+    endRef.current = end;
+  }, [end]);
+
   /** Send whatever has been heard; the stream opening moves us to "thinking". */
   const flush = useCallback(() => {
-    clearSilence();
-    const text = pending.current.trim();
-    pending.current = "";
-    setHeard("");
+    const text = spokenRef.current.trim();
+    resetHeard();
     if (!activeRef.current || !text) return;
 
     stopMic(); // close the mic before the reply starts playing
     chat.send(text, { voice: true });
-  }, [chat, clearSilence, stopMic]);
+  }, [chat, resetHeard, stopMic]);
 
   useEffect(() => {
     flushRef.current = flush;
   }, [flush]);
+
+  /**
+   * The turn ends when the speaker does. Every new word restarts the wait, so
+   * the timer only ever fires on a real pause -- and the effect re-running on
+   * each word is what restarts it, rather than a timer handle passed around by
+   * hand.
+   *
+   * The mic is shut for the whole thinking-and-speaking stretch, so anything
+   * heard here is the user, never the agent's own reply coming back in through
+   * the speakers.
+   */
+  useEffect(() => {
+    if (!active || phase !== "listening" || !spoken.trim()) return;
+
+    // Hang up on request: "end call", "cut call", "call band karo", "bye".
+    if (isExitCommand(spoken)) {
+      endRef.current();
+      return;
+    }
+
+    const timer = setTimeout(() => flushRef.current(), SILENCE_MS);
+    return () => clearTimeout(timer);
+  }, [active, phase, spoken]);
 
   /**
    * Mic follows phase: open while "listening", shut for everything else.
@@ -254,22 +267,12 @@ export function useVoiceCall(chat: {
     speakLive(String(index), last.content, !chat.isLoading);
   }, [active, chat.isLoading, chat.messages, speakLive]);
 
-  const end = useCallback(() => {
-    setActive(false);
-    clearSilence();
-    pending.current = "";
-    setHeard("");
-    stopMic();
-    stopSpeech();
-  }, [clearSilence, stopMic, stopSpeech]);
-
   const start = useCallback(() => {
-    pending.current = "";
-    setHeard("");
+    resetHeard();
     // Joining a thread that already has a reply on screen should not replay it.
     skipIndex.current = chat.messages.length - 1;
     setActive(true);
-  }, [chat.messages]);
+  }, [chat.messages, resetHeard]);
 
   /**
    * Cut the agent off. Stopping playback is all that is needed -- the phase
@@ -287,12 +290,6 @@ export function useVoiceCall(chat: {
     if (micFatal && activeRef.current) end();
   }, [micFatal, end]);
 
-  // Unmount only. Held in a ref so this never depends on `end`'s identity --
-  // leaving a call running is not something a re-render should be able to undo.
-  const endRef = useRef(end);
-  useEffect(() => {
-    endRef.current = end;
-  }, [end]);
   useEffect(() => () => endRef.current(), []);
 
   return {

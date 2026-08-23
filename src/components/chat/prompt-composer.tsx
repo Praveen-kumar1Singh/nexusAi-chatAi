@@ -45,16 +45,38 @@ export function PromptComposer({
     draft.current = value;
   }, [value]);
 
-  const appendSpoken = useCallback(
-    (chunk: string) => {
-      const next = joinSpoken(draft.current, chunk);
-      draft.current = next;
-      onChange(next);
-    },
-    [onChange],
-  );
+  const voice = useVoiceInput();
+  const { transcript: spoken, reset: resetSpoken, stop: stopVoice } = voice;
 
-  const voice = useVoiceInput({ onFinal: appendSpoken });
+  /**
+   * `transcript` is the whole of what has been dictated so far, rewritten in
+   * place as the recogniser changes its mind -- so the previous version is
+   * lifted back out of the box before the new one goes in. Appending each
+   * version instead is what had Chrome on Android stuttering a sentence back
+   * word by word.
+   */
+  const inserted = useRef("");
+  useEffect(() => {
+    if (spoken === inserted.current) return;
+    const head = draft.current.endsWith(inserted.current)
+      ? draft.current.slice(0, draft.current.length - inserted.current.length)
+      : draft.current;
+    inserted.current = spoken;
+    const next = joinSpoken(head, spoken);
+    draft.current = next;
+    onChange(next);
+  }, [spoken, onChange]);
+
+  /** Each press of the mic starts a new dictation rather than resuming the last. */
+  const toggleDictation = useCallback(() => {
+    if (voice.listening) {
+      stopVoice();
+      return;
+    }
+    inserted.current = "";
+    resetSpoken();
+    voice.start();
+  }, [resetSpoken, stopVoice, voice]);
 
   async function addFiles(list: FileList | null) {
     if (!list?.length) return;
@@ -73,7 +95,9 @@ export function PromptComposer({
 
   function submit() {
     if (!value.trim() && attachments.length === 0) return;
-    voice.stop(); // the thought is finished; stop holding the mic open
+    stopVoice(); // the thought is finished; stop holding the mic open
+    inserted.current = "";
+    resetSpoken();
     onSend(attachments);
     setAttachments([]);
     setFileError(null);
@@ -218,7 +242,7 @@ export function PromptComposer({
                   "relative size-8 text-muted-foreground",
                   voice.listening && "bg-destructive/12 text-destructive hover:bg-destructive/20",
                 )}
-                onClick={voice.toggle}
+                onClick={toggleDictation}
                 aria-pressed={voice.listening}
                 aria-label={voice.listening ? "Stop dictation" : "Dictate a message"}
                 title={voice.listening ? "Stop listening" : "Speak your message"}

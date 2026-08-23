@@ -77,36 +77,46 @@ export function joinSpoken(existing: string, chunk: string): string {
 export type VoiceInput = ReturnType<typeof useVoiceInput>;
 
 /**
- * Dictation for the composer. `onFinal` fires once per settled phrase; the
- * words still being decided show up in `interim` so the user can see it working.
+ * Dictation. `transcript` is everything the recogniser has settled on since the
+ * last `reset()`, and `interim` the words it is still deciding, so a caller can
+ * show the sentence forming and read the finished thing off the same snapshot.
+ *
+ * Snapshots rather than a stream of chunks, because that is what the API
+ * actually gives: `results` is a list the recogniser keeps rewriting, and the
+ * entry at a given index is *replaced* as it hears more of that phrase, never
+ * added to. Treating each announcement as new text is what made Chrome on
+ * Android read a sentence back word by word -- "23 23 June 23 June 1757 ..." --
+ * since it re-announces one growing result instead of emitting a result per
+ * phrase the way desktop Chrome does.
  */
-export function useVoiceInput({
-  lang = "en-US",
-  onFinal,
-  onChunk,
-}: {
-  lang?: string;
-  onFinal: (chunk: string) => void;
-  onChunk?: (chunk: string, isFinal: boolean) => void;
-}) {
+export function useVoiceInput({ lang = "en-US" }: { lang?: string } = {}) {
   // Server and first client paint both say "unsupported", so the mic button is
   // absent in the HTML either way and hydration has nothing to reconcile.
   const supported = useSyncExternalStore(noSubscribe, hasRecognition, noRecognitionOnServer);
   const [listening, setListening] = useState(false);
+  const [transcript, setTranscript] = useState("");
   const [interim, setInterim] = useState("");
   const [error, setError] = useState<string | null>(null);
   /** The raw code behind `error`, for callers that treat some as recoverable. */
   const [errorCode, setErrorCode] = useState<string | null>(null);
 
   const recognition = useRef<SpeechRecognitionLike | null>(null);
-  // The composer rebuilds callbacks every render. Holding the latest in a ref
-  // keeps the recognition instance alive across a whole dictation session.
-  const finalHandler = useRef(onFinal);
-  const chunkHandler = useRef(onChunk);
-  useEffect(() => {
-    finalHandler.current = onFinal;
-    chunkHandler.current = onChunk;
-  }, [onFinal, onChunk]);
+
+  /** Settled text of the session now running, held under its result index. */
+  const finals = useRef<string[]>([]);
+  /**
+   * Sessions that have already ended. Recognition stops itself every so often
+   * and hands-free callers reopen it mid-thought; each new session numbers its
+   * results from zero, so finished ones are folded in here to survive that.
+   */
+  const committed = useRef("");
+  /** How many results this session has produced, for `reset` to skip past. */
+  const seen = useRef(0);
+  /** Results `reset` has already disowned; they are the caller's old news. */
+  const dropBefore = useRef(0);
+
+  const compose = () =>
+    joinSpoken(committed.current, finals.current.filter(Boolean).join(" "));
 
   useEffect(() => {
     const Recognition = recognitionCtor();
@@ -122,20 +132,22 @@ export function useVoiceInput({
       setError(null);
       setErrorCode(null);
       setListening(true);
+      finals.current = [];
+      dropBefore.current = 0; // a fresh session numbers its results from zero
+      seen.current = 0;
     };
 
     rec.onresult = (event) => {
-      let pending = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      seen.current = event.results.length;
+      let live = "";
+      for (let i = dropBefore.current; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0]?.transcript ?? "";
-        if (text) {
-          chunkHandler.current?.(text, result.isFinal);
-        }
-        if (result.isFinal) finalHandler.current(text);
-        else pending += text;
+        if (result.isFinal) finals.current[i] = text;
+        else live += text;
       }
-      setInterim(pending);
+      setTranscript(compose());
+      setInterim(live.trim());
     };
 
     rec.onerror = (event) => {
@@ -146,6 +158,10 @@ export function useVoiceInput({
     };
 
     rec.onend = () => {
+      committed.current = compose();
+      finals.current = [];
+      dropBefore.current = 0;
+      seen.current = 0;
       setListening(false);
       setInterim("");
     };
@@ -181,7 +197,34 @@ export function useVoiceInput({
     else start();
   }, [listening, start, stop]);
 
-  return { supported, listening, interim, error, errorCode, start, stop, toggle };
+  /**
+   * Forget everything heard so far, for a caller that has just taken the words
+   * and used them. Deliberately not part of `start`: a hands-free loop reopens
+   * the mic several times inside one sentence and must keep what it has.
+   */
+  const reset = useCallback(() => {
+    committed.current = "";
+    finals.current = [];
+    // Results already taken stay in the recogniser's own list and would be read
+    // back on the next event; step over them rather than hear them twice.
+    dropBefore.current = seen.current;
+    setTranscript("");
+    setInterim("");
+  }, []);
+
+  return {
+    supported,
+    listening,
+    /** Everything settled since the last `reset()`. */
+    transcript,
+    interim,
+    error,
+    errorCode,
+    start,
+    stop,
+    toggle,
+    reset,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
