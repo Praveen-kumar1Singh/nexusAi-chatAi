@@ -121,7 +121,7 @@ def health():
         "key_loaded": bool(keys),
         # Masked, so the rotation is visible without printing a usable secret.
         "keys": [llm.fingerprint(key) for key in keys],
-        "storage": "mongodb-atlas",
+        "storage": store.status(),
         "auth_required": bool(AGENT_TOKEN),
         "speech": tts.status(),
     }

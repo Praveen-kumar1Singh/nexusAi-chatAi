@@ -39,7 +39,17 @@ Environment variables to set on Render:
 | `PYTHON_VERSION` | `3.11.9` |
 
 Confirm it came up: `curl https://<service>.onrender.com/health` should report
-`"key_loaded": true` and `"auth_required": true`.
+`"key_loaded": true`, `"auth_required": true`, and
+
+```json
+"storage": { "backend": "mongodb-atlas", "durable": true, "database": "mantraa_ai" }
+```
+
+**Check that `durable` is `true` before you believe anything is being saved.**
+When Atlas cannot be reached, `store.py` falls back to an in-memory dict and
+keeps answering normally -- conversations save, list and reload for as long as
+the process lives, then vanish at the next restart or free-plan sleep. The
+`error` field alongside it says why; the usual answer is section 3 below.
 
 ## 2. Vercel (the Next.js app)
 

@@ -24,6 +24,10 @@ MONGODB_DB = os.environ.get("MONGODB_DB", "mantraa_ai")
 _lock = threading.Lock()
 _mongo_client = None
 _db = None
+# Why the last connection attempt failed, for /health. Without this the memory
+# fallback below is invisible: every write appears to succeed, every read comes
+# back, and the data is gone at the next restart.
+_last_error: Optional[str] = None
 
 # Fallback in-memory stores if DB connection is unavailable
 _memory_conversations: Dict[str, Dict[str, Any]] = {}
@@ -34,7 +38,7 @@ MAX_TOOL_CALLS = 500
 
 
 def _get_db():
-    global _mongo_client, _db
+    global _mongo_client, _db, _last_error
     if _db is not None:
         return _db
 
@@ -67,12 +71,36 @@ def _get_db():
             # straight off the index instead of sorting in memory.
             _db.conversations.create_index([("user_email", 1), ("updated_at", -1)])
             print("[MongoDB] Connected successfully to Atlas database:", MONGODB_DB)
+            _last_error = None
             return _db
         except Exception as err:
             print("[MongoDB] Warning: MongoDB Atlas direct PyMongo connection unavailable, using memory fallback:", err)
+            _last_error = str(err)
             _db = None
+    else:
+        _last_error = "MONGODB_URI is not set"
 
     return None
+
+
+def status() -> Dict[str, Any]:
+    """Where state is actually going, for /health.
+
+    This used to be reported as the constant string "mongodb-atlas", which was
+    true of the intent and not of the process: when Atlas is unreachable every
+    helper below quietly writes to a dict instead, so conversations look saved
+    for as long as the process lives and are gone at the next deploy. The most
+    likely cause on a hosted agent is the Atlas IP access list, which does not
+    include the host's egress addresses until someone adds them.
+    """
+    db = _get_db()
+    return {
+        "backend": "mongodb-atlas" if db is not None else "memory",
+        "durable": db is not None,
+        "database": MONGODB_DB if db is not None else None,
+        "uri_configured": bool(MONGODB_URI),
+        "error": _last_error,
+    }
 
 
 def _now() -> str:
